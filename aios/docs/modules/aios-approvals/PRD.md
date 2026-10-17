@@ -40,12 +40,26 @@ document.
 | Approval id | The unique identifier of an approval. |
 | Approval state | The state of an approval: pending, granted, denied, expired. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+The operator is the only source of non-determinism. The rule table and the TTL are deterministic.
+
+The module provides the following determinism guarantees.
+
+- Approval decisions are pure functions of the rule table and the request.
+
+- Rule table is content addressed.
+
+- TTL is a pure function of the rule and the clock.
+## 6. User Personas
 
 The user persona is a Go developer with experience
 in async programming and HTTP services.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to request an approval. The
 developer passes the approval payload to the service.
@@ -67,7 +81,7 @@ developer passes the approval id to the service. The
 service blocks the call until the approval state
 changes.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-approvals module provides the following
 functions.
@@ -77,14 +91,14 @@ functions.
 - The approval persistence.
 - The approval notification.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core and aios-policy.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The service creates the approval.
 - The service grants the approval.
@@ -93,13 +107,13 @@ functions.
 - The service persists the approval.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the approval.
 - The remote access to the approval service.
 - The approval expiration policy.
 
-## 11. Open Questions
+## 12. Open Questions
 
 - Does the service support approval expiration? The
   current design supports expiration through a TTL.

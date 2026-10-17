@@ -49,14 +49,28 @@ document.
 | Quality score | A number that measures the result quality. |
 | Cost budget | The maximum cost for a task. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded by `temperature=0`**.
+
+The router is deterministic for a fixed classifier. The cascade escalates on low confidence. Quality feedback updates the strategy from the result quality.
+
+The module provides the following determinism guarantees.
+
+- Router decisions are pure functions of the classifier and the cost tracker.
+
+- Classifier heuristics are deterministic.
+
+- Cascade escalation is deterministic for a fixed cascade threshold.
+## 6. User Personas
 
 The user persona is the operator who sets the cost
 budget. The operator wants the agent to stay within
 the budget. The operator also wants the agent to
 produce high-quality results.
 
-## 6. User Stories
+## 7. User Stories
 
 An operator wants to set a cost budget. The
 operator passes the budget to the optimizer. The
@@ -72,7 +86,7 @@ agent passes the task and the budget to the
 optimizer. The optimizer picks the model. The
 optimizer enforces the budget.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-optimizer module provides the following
 functions.
@@ -83,7 +97,7 @@ functions.
 - The routing strategy.
 - The quality feedback loop.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core and aios-models.
@@ -92,14 +106,14 @@ functions.
 - The router decision has a maximum latency of 5
   milliseconds.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The router picks the right tier for a task.
 - The cost tracker records the cost.
 - The quality feedback loop adjusts the strategy.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The model training.
 - The model fine-tuning.

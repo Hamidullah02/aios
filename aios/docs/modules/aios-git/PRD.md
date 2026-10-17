@@ -45,14 +45,24 @@ document.
 | Untracked | A file that is not tracked by git. |
 | Modified | A tracked file that has local changes. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+The remote repository and the file system are the only sources of non-determinism. The git client is deterministic for a fixed repository state.
+
+The module provides the following determinism guarantees.
+
+- Git operations are pure functions of the repository state and the command.
+## 6. User Personas
 
 The user persona is the agent that needs to inspect
 and change the git state of the project. The agent
 needs safe, auditable, and approval-gated git
 operations.
 
-## 6. User Stories
+## 7. User Stories
 
 An agent wants to check the repo status. The agent
 calls the GitStatus tool. The tool returns the
@@ -80,7 +90,7 @@ The agent calls the GitWorktree tool. The tool
 creates the worktree. The tool returns the
 worktree path.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-git module provides the following
 functions.
@@ -92,7 +102,7 @@ functions.
 - The GitBranch tool.
 - The GitWorktree tool.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-tools,
@@ -103,7 +113,7 @@ functions.
 - The commit operation requires a tier-3 approval
   by default.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The status tool returns the working tree status.
 - The diff tool returns the diff.
@@ -114,7 +124,7 @@ functions.
 - The worktree tool creates the worktree.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for git operations.
 - The remote access to git operations.

@@ -39,12 +39,24 @@ document.
 | Loop check | A check that the agent did not loop. |
 | Head-to-head | A comparison between two systems on the same task. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Highly deterministic**.
+
+The benchmark harness is a pure function of the dataset and the orchestrator.
+
+The module provides the following determinism guarantees.
+
+- Datasets are content addressed.
+
+- Benchmark results are content addressed.
+## 6. User Personas
 
 The user persona is a Go developer who needs to
 measure the performance of the orchestrator.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to run the wedge dataset. The
 developer passes the dataset to the runner. The
@@ -61,7 +73,7 @@ developer passes the dataset to the runner. The
 runner runs the orchestrator. The runner measures
 the loop count. The runner returns the metrics.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-benchmark module provides the following
 functions.
@@ -71,7 +83,7 @@ functions.
 - The two-tier runner.
 - The metrics calculator.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-runtime, and
@@ -79,7 +91,7 @@ functions.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The runner runs the wedge dataset.
 - The runner produces the metrics.
@@ -87,7 +99,7 @@ functions.
 - The loop check produces the metrics.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the runner.
 - The remote access to the runner.

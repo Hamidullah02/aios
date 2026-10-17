@@ -45,14 +45,26 @@ document.
 | Verification prompt | A prompt that asks the model to verify the result. |
 | Verification result | A typed object that holds the verification outcome. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded by `temperature=0`**.
+
+The self-check uses the model. The verification result is deterministic for a fixed model and `temperature=0`. The run_tests tool is deterministic for a fixed test suite.
+
+The module provides the following determinism guarantees.
+
+- Verification prompts are content addressed.
+
+- Test results are content addressed.
+## 6. User Personas
 
 The user persona is the agent that needs to check
 the result. The agent wants to know whether the
 result is correct. The agent wants to know whether
 the tests pass.
 
-## 6. User Stories
+## 7. User Stories
 
 An agent wants to run the test suite. The agent
 calls the run_tests tool. The tool returns the
@@ -68,7 +80,7 @@ An agent wants to fix the result. The agent calls
 the run_tests tool. The tool returns the test
 failures. The agent fixes the failures.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-verify module provides the following
 functions.
@@ -78,7 +90,7 @@ functions.
 - The verification prompt.
 - The verification result.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-tools, and
@@ -86,7 +98,7 @@ functions.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The self-check tool verifies the result.
 - The run_tests tool runs the test suite.
@@ -94,7 +106,7 @@ functions.
 - The verification result is typed.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the verification.
 - The remote access to the verification.

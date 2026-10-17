@@ -38,13 +38,27 @@ document.
 | Match | A condition that selects a subset of tool calls. |
 | Resource | The path or the URL the tool call targets. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Highly deterministic**.
+
+Policy gateway is a pure function of the rule table and the tool call. No state, no clock.
+
+The module provides the following determinism guarantees.
+
+- Policy decisions are pure functions of inputs.
+
+- Rule table is content addressed.
+
+- Policy is immutable after the run starts.
+## 6. User Personas
 
 The user persona is a Go developer with experience
 in rule engines. The user writes a policy file and
 loads it into the gateway.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to deny all writes to a sensitive
 directory. The developer adds a rule to the policy
@@ -62,7 +76,7 @@ file. The rule matches the tool name. The rule has the
 action `allow`. The gateway returns the allow
 decision.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-policy module provides the following
 functions.
@@ -73,7 +87,7 @@ functions.
 - A policy decision type that represents the result.
 - A policy audit row that records the decision.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 The aios-policy module has the following non-functional
 requirements.
@@ -86,7 +100,7 @@ requirements.
 - The gateway decision has a maximum latency of 1
   millisecond.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 The aios-policy module is successful when the following
 conditions are met.
@@ -99,7 +113,7 @@ conditions are met.
 - The test suite has 100 percent coverage for the
   public functions.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 The aios-policy module does not include the following
 functions. The functions are in other modules.
@@ -108,7 +122,7 @@ functions. The functions are in other modules.
 - The remote access to the policy file.
 - The policy file editor.
 
-## 11. Open Questions
+## 12. Open Questions
 
 The following questions are open. The project will
 resolve the questions before the implementation phase.

@@ -240,9 +240,67 @@ The verification failed flow runs as follows.
    planner.
 5. The planner revises the plan.
 
-## 8. Sequence Diagrams
+## 8. Determinism Flows
 
-### 8.1 Run Sequence
+The determinism flows are the flows that protect
+the determinism thesis. The flows are listed
+below.
+
+### 8.1 Replay Flow
+
+The replay flow runs as follows.
+
+1. The operator runs `aios replay <session_id>`.
+2. The CLI loads the session from
+   `internal/persist`.
+3. The CLI loads the checkpoint from
+   `internal/persist`.
+4. The CLI passes the checkpoint to the replay
+   engine.
+5. The replay engine re-executes the plan from
+   the checkpoint.
+6. The replay engine produces a new audit log.
+7. The CLI shows the new audit log.
+
+### 8.2 Diff Flow
+
+The diff flow runs as follows.
+
+1. The operator runs `aios diff <session_id_a>
+   <session_id_b>`.
+2. The CLI loads both sessions from
+   `internal/persist`.
+3. The CLI loads both audit logs.
+4. The CLI computes the unified diff.
+5. The CLI shows the diff.
+
+### 8.3 Plan Revision Flow
+
+The plan revision flow runs as follows.
+
+1. The agent revises the plan.
+2. The orchestrator detects the revision.
+3. The orchestrator rejects the revision because
+   the plan is immutable.
+4. The orchestrator writes the
+   `plan_revision_rejected` audit row.
+5. The orchestrator stops the run.
+
+### 8.4 Policy Revision Flow
+
+The policy revision flow runs as follows.
+
+1. The operator revises the policy.
+2. The orchestrator detects the revision.
+3. The orchestrator rejects the revision because
+   the policy is immutable.
+4. The orchestrator writes the
+   `policy_revision_rejected` audit row.
+5. The orchestrator stops the run.
+
+## 9. Sequence Diagrams
+
+### 9.1 Run Sequence
 
 The run sequence has the steps below.
 
@@ -254,7 +312,7 @@ The run sequence has the steps below.
 6. The orchestrator calls the report generator.
 7. The CLI shows the report.
 
-### 8.2 Task Sequence
+### 9.2 Task Sequence
 
 The task sequence has the steps below.
 
@@ -269,7 +327,7 @@ The task sequence has the steps below.
 9. The orchestrator writes the audit row.
 10. The orchestrator dispatches the next task.
 
-### 8.3 Approval Sequence
+### 9.3 Approval Sequence
 
 The approval sequence has the steps below.
 

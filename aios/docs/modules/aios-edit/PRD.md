@@ -53,13 +53,25 @@ document.
 | apply_patch | The OpenAI-style diff edit format. |
 | Notebook cell | A single cell in a Jupyter notebook file. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+File system is the only source of non-determinism. The edit tool is deterministic for a fixed file content.
+
+The module provides the following determinism guarantees.
+
+- Edits are content addressed.
+
+- The edit format is a pure function of the input and the file content.
+## 6. User Personas
 
 The user persona is the agent that needs to change
 source files without rewriting the whole file. The
 agent needs precise, auditable, and safe edits.
 
-## 6. User Stories
+## 7. User Stories
 
 An agent wants to rename a function. The agent calls
 the Edit tool with the old_string and the new_string.
@@ -81,7 +93,7 @@ calls the NotebookEdit tool with the cell id, the
 new source, and the cell type. The tool updates the
 cell. The tool returns the result.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-edit module provides the following
 functions.
@@ -94,7 +106,7 @@ functions.
 - The Write permission check (whole-file writes
   require approval tier-3 by default).
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core and aios-tools.
@@ -104,7 +116,7 @@ functions.
   either succeeds for all targets or fails for all
   targets.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The Edit tool replaces a unique match.
 - The Edit tool fails on a non-unique match when
@@ -121,7 +133,7 @@ functions.
   atomic-write path.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the edits.
 - The remote access to the edits.

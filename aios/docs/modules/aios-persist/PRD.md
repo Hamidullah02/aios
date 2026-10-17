@@ -47,14 +47,30 @@ document.
 | Handoff | The data passed between two tasks. |
 | Artifact | A file or value produced by a task. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Highly deterministic**.
+
+Rule storage, checkpoints, handoffs, and history are all content addressed. The clock is only used for ordering.
+
+The module provides the following determinism guarantees.
+
+- Rules are content addressed.
+
+- Checkpoints are content addressed.
+
+- Handoffs are content addressed.
+
+- History is an append-only log with a hash chain.
+## 6. User Personas
 
 The user persona is the operator who grants a
 standing approval. The operator wants the rule to
 persist across sessions. The operator wants to
 review the rules.
 
-## 6. User Stories
+## 7. User Stories
 
 An operator wants to grant a standing approval.
 The operator types `y, always` at the approval
@@ -68,7 +84,7 @@ A planner wants to pass an artifact between tasks.
 The planner calls the handoff API. The API saves
 the artifact. The next task reads the artifact.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-persist module provides the following
 functions.
@@ -78,14 +94,14 @@ functions.
 - The structured handoff.
 - The session history.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core and aios-policy.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The always-allow rule storage saves the rules.
 - The session state checkpoint saves the session.
@@ -93,7 +109,7 @@ functions.
 - The session history lists the past sessions.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the rules.
 - The remote access to the rules.

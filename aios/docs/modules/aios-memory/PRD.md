@@ -45,14 +45,26 @@ document.
 | CONVENTIONS.md | The aios conventions file. |
 | .aiosignore | The aios ignore file. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Highly deterministic**.
+
+The KV store is content addressed. The clock is only used for TTL ordering.
+
+The module provides the following determinism guarantees.
+
+- Keys and values are content addressed.
+
+- The clock is injected through a typed interface.
+## 6. User Personas
 
 The user persona is the operator who edits the
 project memory. The operator writes the conventions
 for the project. The operator lists the paths to
 skip.
 
-## 6. User Stories
+## 7. User Stories
 
 An operator wants to add project instructions. The
 operator creates the AGENTS.md file. The CLI loads
@@ -70,7 +82,7 @@ An agent wants to compact the context. The agent
 calls the compact context tool. The tool returns the
 summarized context.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-memory module provides the following
 functions.
@@ -80,7 +92,7 @@ functions.
 - The ignore loader.
 - The context compactor.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-models, and
@@ -88,7 +100,7 @@ functions.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The project memory loader loads the AGENTS.md
   file.
@@ -98,7 +110,7 @@ functions.
 - The context compactor summarizes the context.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the memory.
 - The remote access to the memory.

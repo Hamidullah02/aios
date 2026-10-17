@@ -7,6 +7,13 @@ design documents for the project. The documents follow
 the ASD-STE100 writing standard. See the Standards
 folder for the writing standard and the coding standard.
 
+The whole point of aios is to make complex coding
+and large systems deterministic. Every part of the
+system that is not the model, the clock, the network,
+or the operator is a pure function of its inputs.
+The system is replayable, diffable, and reproducible
+on a second host. The audit log is the proof.
+
 ## Layout
 
 The documentation has three top-level folders.

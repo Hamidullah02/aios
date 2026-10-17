@@ -53,29 +53,86 @@ The aios project is not in scope for this document.
 | Layer | A horizontal band of modules. The bands are foundation, capability, agentic, and operator. |
 | Wedge | A set of 20 well-defined software delivery tasks. The set is the benchmark for the orchestrator. |
 | Tier | A risk level for an action. The levels are 1 (read), 2 (local write), 3 (network or irreversible). |
+| Determinism | The same plan, on the same input, under the same model configuration, with the same operator approvals, produces the same audit trail and the same outcome. |
+| Reproducibility | A run can be re-executed from its audit log and its checkpoints to produce an equivalent forward path. |
 
-## 5. Product Vision
+## 5. The Determinism Thesis
 
-The aios project is a small, durable task runner for
+The whole point of aios is to make complex coding and
+large systems deterministic.
+
+Large language models are non-deterministic. They
+are stochastic samplers. They drift between runs. A
+system built directly on a model inherits that
+drift. The result is the familiar experience: an
+agent that worked yesterday breaks today, and no
+one can say why.
+
+aios fixes this by separating the model from every
+part of the system that must be stable. The model
+is one input. Everything else is enforced by code
+that is itself deterministic. The result is a
+system where every non-determinism is explicit,
+narrow, and bounded.
+
+The non-determinism budget is listed below.
+
+- The model output is non-deterministic. The
+  budget for the model is `temperature=0`. The
+  budget for variance is the cascade and the
+  quality feedback loop.
+- The wall clock is non-deterministic. The budget
+  for the clock is the audit timestamp. The
+  budget for timing is the timeout policy.
+- The network is non-deterministic. The budget
+  for the network is the retry policy. The
+  budget for failure is the policy gateway.
+- The operator is non-deterministic. The budget
+  for the operator is the approval rules. The
+  budget for variance is the auto-allow rules.
+
+Every other part of the system is deterministic by
+construction. The plan is a typed value. The
+audit row is the result of a pure function. The
+checkpoint is a content-addressed snapshot. The
+hash chain is a cryptographic proof. The replay
+is a re-execution from the same input through the
+same code path.
+
+## 6. Product Vision
+
+The aios project is a deterministic task runner for
 software delivery. The user states an objective. The
-system turns the objective into a typed task plan. The
-system executes the plan in a sandbox. The system
-verifies the result with tests and schema checks. The
-system checkpoints every step. The system audits every
-decision. The system pauses for human approval on
-risky actions.
+system turns the objective into a typed task plan.
+The system executes the plan in a sandbox. The
+system verifies the result with tests and schema
+checks. The system checkpoints every step. The
+system audits every decision. The system pauses
+for human approval on risky actions.
 
 The system is not a chatbot. The system is not a
-platform. The system is a library that one person can
-operate. The system runs on a Linux host with Docker.
-The system works with any model provider through a
-typed adapter layer. The system costs less than
-$50 per month for a single user at the prototype
-stage.
+platform. The system is a library that one person
+can operate. The system runs on a Linux host with
+Docker. The system works with any model provider
+through a typed adapter layer. The system costs
+less than $50 per month for a single user at the
+prototype stage.
 
-## 6. User Personas
+The user can replay any run. The user can diff two
+runs of the same plan. The user can answer the
+question "why did the agent do X" by reading the
+audit log. The user can answer the question "what
+would the agent do" by replaying the plan from a
+checkpoint.
 
-### 6.1 Builder
+The system is judged on its determinism, not on
+its cleverness. A simpler plan that always
+reproduces the same outcome is more valuable than
+a clever plan that drifts between runs.
+
+## 7. User Personas
+
+### 7.1 Builder
 
 The builder is a software engineer. The builder uses
 aios to ship code. The builder wants the agent to
@@ -84,7 +141,7 @@ agent to ask before risky actions. The builder wants
 to be able to read the audit log and understand what
 the agent did.
 
-### 6.2 Operator
+### 7.2 Operator
 
 The operator is the person who runs the system. The
 operator sets the model, the budget, the policy, and
@@ -92,15 +149,15 @@ the approval rules. The operator wants the system to
 stay within the budget. The operator wants the system
 to learn from the results.
 
-### 6.3 Reviewer
+### 7.3 Reviewer
 
 The reviewer is a person who audits the run. The
 reviewer reads the report. The reviewer checks the
 audit log. The reviewer signs off on the run.
 
-## 7. User Stories
+## 8. User Stories
 
-### 7.1 Builder Stories
+### 8.1 Builder Stories
 
 The builder wants to give the system a goal. The
 builder types the goal at the CLI. The system turns
@@ -118,7 +175,7 @@ actions. The system pauses the run. The system
 shows the approval prompt. The builder approves
 or denies the action.
 
-### 7.2 Operator Stories
+### 8.2 Operator Stories
 
 The operator wants to set the model. The operator
 edits `var/models.yaml`. The system uses the model
@@ -138,7 +195,7 @@ operator types `y, always` at the approval prompt.
 The system saves the rule. The system applies the
 rule to future runs.
 
-### 7.3 Reviewer Stories
+### 8.3 Reviewer Stories
 
 The reviewer wants to read the report. The reviewer
 runs `aios report`. The system shows the report in
@@ -153,13 +210,13 @@ runs `aios replay <session_id>`. The system
 re-executes the plan. The system produces a new
 report.
 
-## 8. Functional Requirements Summary
+## 9. Functional Requirements Summary
 
 The aios project provides the following functions.
 The functions are realized by the modules listed
 under each function.
 
-### 8.1 Foundation Functions
+### 9.1 Foundation Functions
 
 - The typed schemas, the audit log, the state
   machine, and the redaction layer. The functions
@@ -181,7 +238,7 @@ under each function.
   session history. The functions are in
   `github.com/<org>/aios/internal/persist`.
 
-### 8.2 Capability Functions
+### 9.2 Capability Functions
 
 - The tool bus and the built-in tools. The function
   is in `github.com/<org>/aios/internal/tools`.
@@ -212,7 +269,7 @@ under each function.
 - The report generator. The function is in
   `github.com/<org>/aios/internal/report`.
 
-### 8.3 Agentic Functions
+### 9.3 Agentic Functions
 
 - The planner and the code-first verifier. The
   function is in `github.com/<org>/aios/internal/planner`.
@@ -221,17 +278,17 @@ under each function.
 - The benchmark harness. The function is in
   `github.com/<org>/aios/internal/benchmark`.
 
-### 8.4 Operator Functions
+### 9.4 Operator Functions
 
 - The first-run CLI and the approval daemon. The
   function is in `github.com/<org>/aios/internal/cli`.
 
-## 9. Non-Functional Requirements Summary
+## 10. Non-Functional Requirements Summary
 
 The aios project provides the following non-functional
 qualities. The qualities span every module.
 
-### 9.1 Performance
+### 10.1 Performance
 
 - The orchestrator dispatches a task within 1 second
   when the plan is loaded.
@@ -242,7 +299,7 @@ qualities. The qualities span every module.
 - The router decision has a maximum latency of
   5 milliseconds.
 
-### 9.2 Security
+### 10.2 Security
 
 - Every tool call goes through the policy gateway.
 - The sandbox isolates every task by default.
@@ -253,7 +310,7 @@ qualities. The qualities span every module.
 - The approval queue pauses for human input on
   tier-3 actions.
 
-### 9.3 Reliability
+### 10.3 Reliability
 
 - The state machine saves a checkpoint after every
   step.
@@ -265,7 +322,7 @@ qualities. The qualities span every module.
 - The watcher notifies the orchestrator of file
   system events.
 
-### 9.4 Maintainability
+### 10.4 Maintainability
 
 - Every module is a standalone Go package.
 - Every module has the same six documents.
@@ -276,7 +333,7 @@ qualities. The qualities span every module.
 - The merge order is bottom-up. The lower-level
   modules merge first.
 
-### 9.5 Cost
+### 10.5 Cost
 
 - The prototype budget is under $50 per month for
   a single user.
@@ -287,12 +344,12 @@ qualities. The qualities span every module.
 - The budget meter stops the run when the budget
   is exhausted.
 
-## 10. Cross-Module Requirements
+## 11. Cross-Module Requirements
 
 The aios project has the following requirements that
 span more than one module.
 
-### 10.1 Module Interface Contract
+### 11.1 Module Interface Contract
 
 Every module shall export a typed interface through
 `github.com/<org>/aios/internal/<module>`. The interface shall be stable across
@@ -300,7 +357,7 @@ minor versions. The interface shall be tested in
 isolation. The interface shall not depend on the
 implementation of any other module.
 
-### 10.2 Audit Log Contract
+### 11.2 Audit Log Contract
 
 Every module that produces a side effect shall write
 an audit row. The row shall include the timestamp,
@@ -308,55 +365,55 @@ the actor, the action, the result, and the hash of
 the previous row. The row type shall be in the
 `github.com/<org>/aios/internal/core` module.
 
-### 10.3 Policy Contract
+### 11.3 Policy Contract
 
 Every tool call shall go through the policy gateway.
 The policy gateway shall return `allow`, `deny`, or
 `ask`. The `ask` action shall route to the approval
 service.
 
-### 10.4 Cost Contract
+### 11.4 Cost Contract
 
 Every model call shall record the cost. The cost
 shall be computed through the price table in
 `github.com/<org>/aios/internal/models`. The cost shall be recorded in the
 audit log.
 
-### 10.5 Approval Contract
+### 11.5 Approval Contract
 
 Every tier-3 action shall route to the approval
 service. The approval service shall persist the
 decision. The approval service shall notify the
 waiter.
 
-### 10.6 Retry Contract
+### 11.6 Retry Contract
 
 Every tool call that fails shall go through the
 retry policy. The retry policy shall return `retry`,
 `retry_with_fix`, or `stop`. The retry policy
 shall cap the retries.
 
-### 10.7 Verify Contract
+### 11.7 Verify Contract
 
 Every task result shall go through the self-check
 before the task is marked as done. The self-check
 shall return `pass`, `fail`, or `inconclusive`.
 
-### 10.8 Role Contract
+### 11.8 Role Contract
 
 Every task shall resolve to a role. The role shall
 include the system prompt, the tool set, the model
 tier, and the output format. The role shall be
 loaded from `var/roles.yaml`.
 
-### 10.9 Persist Contract
+### 11.9 Persist Contract
 
 Every standing approval shall be persisted. The
 persisted rule shall be applied to future runs. The
 rule shall be stored at `~/.aios/rules.json` or
 `var/rules.json`.
 
-### 10.10 Handoff Contract
+### 11.10 Handoff Contract
 
 Every task that produces an artifact shall publish
 the artifact to the handoff store. The next task
@@ -364,7 +421,56 @@ shall read the artifact from the handoff store. The
 artifact shall be a file path or a JSON-serializable
 value.
 
-## 11. Success Criteria
+### 11.11 Determinism Contract
+
+The system shall be deterministic for every part
+that does not involve the model, the wall clock,
+the network, or the operator. The model, the clock,
+the network, and the operator are the only sources
+of non-determinism. Every other part of the system
+is a pure function of its inputs.
+
+**REQ-GLB-DET-001** The system shall be replayable
+from the audit log. The replay shall re-execute
+the plan. The replay shall produce an equivalent
+forward path.
+
+**REQ-GLB-DET-002** The system shall use
+`temperature=0` for every model call by default.
+The system shall reject any model call with
+`temperature>0` unless the call is wrapped in a
+replay-tagged section that records the temperature.
+
+**REQ-GLB-DET-003** The system shall not use the
+wall clock in any decision path. The system shall
+inject the clock through a typed interface. The
+tests shall pass a fixed clock.
+
+**REQ-GLB-DET-004** The system shall not depend on
+the file system path string in any decision path.
+The system shall identify files by content hash.
+
+**REQ-GLB-DET-005** The system shall use
+content-addressed checkpoints. The checkpoint id
+shall be the SHA-256 of the checkpoint payload.
+
+**REQ-GLB-DET-006** The system shall reject
+mid-flight changes to the plan. The plan shall be
+immutable from the moment the orchestrator
+dispatches the first task. Any revision shall
+require a new plan id and a new audit row.
+
+**REQ-GLB-DET-007** The system shall reject
+mid-flight changes to the policy. The policy shall
+be immutable from the moment the run starts. Any
+revision shall require a new run id.
+
+**REQ-GLB-DET-008** The system shall be diffable.
+The user shall be able to diff two runs of the
+same plan. The diff shall be over the audit log
+and the tool results.
+
+## 12. Success Criteria
 
 The aios project is successful when the following
 criteria are met.
@@ -384,8 +490,14 @@ criteria are met.
   public functions of every module.
 - The documentation set is complete for every
   module.
+- The replay of any run produces an equivalent
+  audit log for every step that does not involve
+  the model.
+- The system runs identically on two hosts given
+  the same input, the same plan, the same
+  approvals, and a fixed clock.
 
-## 12. Out of Scope
+## 13. Out of Scope
 
 The aios project does not cover the following items
 at the prototype stage.
@@ -403,7 +515,7 @@ at the prototype stage.
 - The agents editing their own policy.
 - The always-on unattended outbound messaging.
 
-## 13. Risks
+## 14. Risks
 
 The aios project has the following risks. The risks
 are tracked in the implementation plan.
@@ -421,8 +533,15 @@ are tracked in the implementation plan.
   search tool.
 - The hash chain breaks. The mitigation is the
   re-anchor tool and the audit log repair.
+- The model drifts between runs. The mitigation is
+  `temperature=0` plus the cascade plus the
+  quality feedback loop. The drift is recorded in
+  the audit log.
+- The replay diverges from the original run. The
+  mitigation is the content-addressed checkpoints
+  and the immutable plan.
 
-## 14. Version
+## 15. Version
 
 This document is version 1.0. The previous version
 was 0.9. The change is the addition of the

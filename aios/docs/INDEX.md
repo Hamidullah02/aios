@@ -6,6 +6,14 @@ This document lists every file in the documentation
 set. The list is for quick navigation. The reader
 uses the list to find the file for a topic.
 
+The whole point of aios is to make complex coding
+and large systems deterministic. The documentation
+set describes a system that is built so that every
+part that is not the model, the clock, the network,
+or the operator is a pure function of its inputs.
+The system is replayable, diffable, and reproducible
+on a second host.
+
 ## Top-Level Files
 
 | File | Description |

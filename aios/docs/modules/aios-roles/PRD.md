@@ -42,13 +42,25 @@ document.
 | Tool set | The list of tools the agent can use. |
 | Model tier | The model capability level for the agent. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Highly deterministic**.
+
+The role registry is content addressed. The resolver is a pure function of the role and the request.
+
+The module provides the following determinism guarantees.
+
+- Roles are content addressed.
+
+- Resolver decisions are pure functions of the registry and the request.
+## 6. User Personas
 
 The user persona is the planner or the operator
 who wants to set the agent behavior. The user
 defines the roles through the config.
 
-## 6. User Stories
+## 7. User Stories
 
 A planner wants to assign a role to a task. The
 planner passes the role name to the role resolver.
@@ -59,7 +71,7 @@ operator adds the role to the config. The
 operator reloads the config. The role is
 available.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-roles module provides the following
 functions.
@@ -69,14 +81,14 @@ functions.
 - The role resolver.
 - The default roles.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core and aios-models.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The role registry stores the roles.
 - The role configuration is loaded from a YAML
@@ -85,7 +97,7 @@ functions.
 - The default roles cover the common cases.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the roles.
 - The remote access to the roles.

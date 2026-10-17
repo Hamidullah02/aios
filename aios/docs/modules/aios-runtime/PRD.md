@@ -43,12 +43,26 @@ document.
 | Resume | The operation that restarts a task from a checkpoint. |
 | Checkpoint | The saved state of a task for resume. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+The orchestrator coordinates the non-determinism sources. The orchestrator itself is deterministic for a fixed clock, a fixed model configuration, and a fixed operator.
+
+The module provides the following determinism guarantees.
+
+- State transitions are pure functions of the current state and the event.
+
+- Checkpoints are content addressed.
+
+- The orchestrator is replayable from any checkpoint.
+## 6. User Personas
 
 The user persona is a Go developer with experience
 in async programming and state machines.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to run a TaskPlan. The developer
 passes the plan to the orchestrator. The orchestrator
@@ -63,7 +77,7 @@ A developer wants to stop a running task. The
 developer passes the task id to the orchestrator. The
 orchestrator cancels the task.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-runtime module provides the following
 functions.
@@ -75,7 +89,7 @@ functions.
 - The resume handler that restarts a paused task.
 - The decision tracer that records every decision.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 The aios-runtime module has the following non-functional
 requirements.
@@ -90,7 +104,7 @@ requirements.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 The aios-runtime module is successful when the
 following conditions are met.
@@ -103,7 +117,7 @@ following conditions are met.
 - The four concurrency caps are enforced.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 The aios-runtime module does not include the following
 functions.
@@ -112,7 +126,7 @@ functions.
 - The remote access to the orchestrator.
 - The scheduler for periodic tasks.
 
-## 11. Open Questions
+## 12. Open Questions
 
 The following questions are open.
 

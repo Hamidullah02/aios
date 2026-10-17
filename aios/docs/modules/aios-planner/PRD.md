@@ -36,12 +36,24 @@ document.
 | Verifier | The component that checks the plan is valid. |
 | Repair | The loop that fixes a plan when the verifier fails. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded by `temperature=0`**.
+
+The planner uses the model. The plan is deterministic for a fixed model and `temperature=0`. The plan is content addressed.
+
+The module provides the following determinism guarantees.
+
+- Plans are content addressed.
+
+- The plan is immutable after the first dispatch.
+## 6. User Personas
 
 The user persona is a Go developer who needs to
 turn a goal into a plan.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to plan a goal. The developer
 passes the goal to the planner. The planner returns
@@ -56,7 +68,7 @@ A developer wants to repair a plan. The developer
 passes the plan and the errors to the planner. The
 planner returns the repaired plan.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-planner module provides the following
 functions.
@@ -65,7 +77,7 @@ functions.
 - The code-first verifier.
 - The plan repair loop.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-runtime, and
@@ -73,7 +85,7 @@ functions.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The planner returns a valid plan.
 - The verifier returns pass for a valid plan.
@@ -81,7 +93,7 @@ functions.
 - The planner repairs an invalid plan.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the planner.
 - The remote access to the planner.

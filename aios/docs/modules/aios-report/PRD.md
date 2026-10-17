@@ -37,12 +37,24 @@ document.
 | Renderer | A component that turns a report into a format. |
 | Run | A single execution of a plan. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Highly deterministic**.
+
+The report generator is a pure function of the audit log and the report template.
+
+The module provides the following determinism guarantees.
+
+- Reports are content addressed.
+
+- The report format is a pure function of the audit log and the template.
+## 6. User Personas
 
 The user persona is a developer who needs to review
 the run results.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to view the report as JSON. The
 developer calls the JSON renderer. The renderer
@@ -56,7 +68,7 @@ A developer wants to view the report as HTML. The
 developer calls the HTML renderer. The renderer
 returns the HTML.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-report module provides the following
 functions.
@@ -66,21 +78,21 @@ functions.
 - The Markdown renderer.
 - The HTML renderer.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The JSON renderer returns valid JSON.
 - The Markdown renderer returns valid Markdown.
 - The HTML renderer returns valid HTML.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the report.
 - The remote access to the report.

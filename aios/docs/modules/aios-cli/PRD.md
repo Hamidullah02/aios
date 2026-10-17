@@ -40,14 +40,24 @@ document.
 | Subcommand | A command under the main command. |
 | Tier-3 action | A high-risk action that needs operator approval. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+The operator and the wall clock are the only sources of non-determinism. The CLI is a pure function of the command and the config.
+
+The module provides the following determinism guarantees.
+
+- The CLI is replayable through the audit log.
+## 6. User Personas
 
 The user persona is an operator who needs to run the
 agent. The operator may have a non-technical
 background. The operator needs clear prompts and
 clear errors.
 
-## 6. User Stories
+## 7. User Stories
 
 An operator wants to run a plan. The operator types
 `aios run plan.yaml`. The CLI loads the plan. The
@@ -66,7 +76,7 @@ An operator wants to start the daemon. The operator
 types `aios daemon start`. The CLI starts the
 daemon. The daemon listens for approval requests.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-cli module provides the following
 functions.
@@ -76,7 +86,7 @@ functions.
 - The command parser.
 - The error display.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on every other module.
@@ -84,7 +94,7 @@ functions.
   public functions.
 - The module is the only entry point for the user.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The CLI loads a plan.
 - The CLI runs a plan.
@@ -94,13 +104,13 @@ functions.
 - The CLI starts the daemon.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The web interface for the CLI.
 - The mobile interface for the CLI.
 - The remote access to the CLI.
 
-## 11. Open Questions
+## 12. Open Questions
 
 - Does the CLI support a config file? The current
   design supports `./var/config.yaml`.

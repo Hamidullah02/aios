@@ -40,14 +40,26 @@ document.
 | Worktree | A separate working copy linked to the same repo. |
 | Context | The information the model sees on a call. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded by `temperature=0`**.
+
+The parallel runner is deterministic for a fixed model configuration. The merge is a pure function of the sub-agent results.
+
+The module provides the following determinism guarantees.
+
+- Sub-agent results are content addressed.
+
+- The merge is a pure function of the results and the merge function.
+## 6. User Personas
 
 The user persona is the agent that needs to do
 several things at once. The agent wants to delegate
 the work to sub-agents. The agent wants to merge
 the results.
 
-## 6. User Stories
+## 7. User Stories
 
 An agent wants to run three research tasks at once.
 The agent calls the fan-out tool. The tool spawns
@@ -63,7 +75,7 @@ An agent wants to merge the work from two
 worktrees. The agent calls the merge tool. The
 tool merges the changes from both worktrees.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-fanout module provides the following
 functions.
@@ -73,7 +85,7 @@ functions.
 - The worktree isolation.
 - The result merge.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-runtime,
@@ -82,7 +94,7 @@ functions.
   public functions.
 - The module supports up to 8 parallel sub-agents.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The sub-agent delegation spawns a sub-agent.
 - The parallel task execution runs multiple tasks.
@@ -90,7 +102,7 @@ functions.
 - The result merge merges the results.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the fan-out.
 - The remote access to the fan-out.

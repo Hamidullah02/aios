@@ -40,6 +40,8 @@ surfaces.
 - The watcher event stream.
 - The benchmark dashboard.
 - The audit log viewer.
+- The replay screen.
+- The diff screen.
 
 ## 6. Wireframes
 
@@ -153,7 +155,52 @@ surfaces.
 ================================================================
 ```
 
-### 6.6 Audit Log Viewer
+### 6.6 Replay Screen
+
+```
+================================================================
+  REPLAY
+================================================================
+  Source session: sess-abc-123
+  Checkpoint:     chk-789 (sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08)
+  Model:          claude-sonnet-4-5 (temperature: 0)
+  Status:         reproducing
+================================================================
+  Step 1: tool_call   read_file   - same
+  Step 2: tool_call   search      - same
+  Step 3: tool_call   edit        - same
+  Step 4: tool_call   run_tests   - same
+  Step 5: model_call  coder       - same (sha256:7f83b1657ff1fc53b92dc18148a1d65d...)
+================================================================
+  [s] Stop    [p] Pause    [v] Verify chain
+================================================================
+```
+
+### 6.7 Diff Screen
+
+```
+================================================================
+  DIFF
+================================================================
+  Session A: sess-abc-123 (2026-10-17T10:30:00Z)
+  Session B: sess-def-456 (2026-10-17T11:00:00Z)
+  Plan:      same (sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08)
+  Policy:    same (sha256:8843d7f92416211de9ebb963ff4ce28125932878...)
+================================================================
+  --- a/sess-abc-123
+  +++ b/sess-def-456
+  @@ step 3: edit @@
+  - old_string: "def hello():\n    return 'world'\n"
+  + old_string: "def hello():\n    return 'world'\n"
+  @@ step 5: model_call @@
+  - output sha: 7f83b1657ff1fc53b92dc18148a1d65d...
+  + output sha: a3bf4f1b2b0b822cd15d6c15b0f00a0893...
+================================================================
+  Summary: 0 tool diff, 1 model diff, 0 policy diff
+================================================================
+```
+
+### 6.8 Audit Log Viewer
 
 ```
 ================================================================
@@ -221,3 +268,21 @@ surfaces.
 - The viewer paginates the log.
 - The viewer verifies the hash chain.
 - The viewer exports the log to a file.
+
+### 7.7 Replay Screen
+
+- The operator types `aios replay <session_id>` to
+  start a replay.
+- The replay uses the same model adapter, the same
+  model id, the same temperature, and the same role
+  resolver.
+- The replay produces an equivalent audit log for
+  every step that does not involve the model.
+
+### 7.8 Diff Screen
+
+- The operator types `aios diff <session_a>
+  <session_b>` to start a diff.
+- The diff is in unified diff format.
+- The diff covers the audit log and the tool
+  results.

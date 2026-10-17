@@ -40,12 +40,26 @@ document.
 | Tool call | A request to invoke a tool with arguments. |
 | Tool result | The return value of a tool call. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+File system is the only source of non-determinism. The tool bus and the policy gateway are deterministic.
+
+The module provides the following determinism guarantees.
+
+- Tool calls are content addressed.
+
+- Tool results are content addressed.
+
+- The bus is a pure function of the call and the policy.
+## 6. User Personas
 
 The user persona is a Go developer who needs
 safe file and shell operations.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to read a file. The developer calls
 the file read tool. The tool returns the file
@@ -64,7 +78,7 @@ developer calls the shell run tool. The tool runs
 the command through the sandbox. The tool returns
 the result.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-tools module provides the following
 functions.
@@ -75,7 +89,7 @@ functions.
 - The file search tool.
 - The shell run tool.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-policy,
@@ -84,7 +98,7 @@ functions.
   public functions.
 - The tools return within the budget limits.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The tool bus dispatches every tool.
 - The file read tool returns the file content.
@@ -93,13 +107,13 @@ functions.
 - The shell run tool runs the command.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the tools.
 - The remote access to the tools.
 - The tool marketplace.
 
-## 11. Open Questions
+## 12. Open Questions
 
 - Does the file write tool support atomic writes?
   The current design uses a temp file and rename.

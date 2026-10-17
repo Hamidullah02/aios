@@ -43,12 +43,24 @@ document.
 | Symbol | A named program element: function, class, variable. |
 | Diagnostics | Lint and type-check results for source code. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+File system is the only source of non-determinism. The search results are deterministic for a fixed file system state.
+
+The module provides the following determinism guarantees.
+
+- Search results are content addressed.
+
+- The result format is a pure function of the file content.
+## 6. User Personas
 
 The user persona is the agent that needs to find
 files, lines, or symbols in the workspace.
 
-## 6. User Stories
+## 7. User Stories
 
 An agent wants to find a file by name. The agent
 calls the Glob tool. The tool returns the matching
@@ -66,7 +78,7 @@ An agent wants to check for type errors. The agent
 calls the Diagnostics tool. The tool runs the
 type-checker. The tool returns the diagnostics.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-search module provides the following
 functions.
@@ -76,7 +88,7 @@ functions.
 - The CodeSearch tool for symbol search.
 - The Diagnostics tool for code checks.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-tools, and
@@ -86,7 +98,7 @@ functions.
 - The Grep tool searches 1 MB of source code in
   under 1 second.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The Glob tool returns the matching paths.
 - The Grep tool returns the matching lines.
@@ -94,7 +106,7 @@ functions.
 - The Diagnostics tool returns the diagnostics.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the searches.
 - The remote access to the searches.

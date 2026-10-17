@@ -232,6 +232,42 @@ The test cases for the optimizer are listed below.
 - The quality feedback updates the strategy.
 - The cascade mode escalates on low confidence.
 
+### 6.12 Determinism Tests
+
+The test cases for determinism are listed below.
+The test cases are the highest-priority acceptance
+gate for the project. The whole point of aios is
+to make complex coding and large systems
+deterministic. Every test case in this section
+must pass.
+
+- The plan is immutable after the first dispatch.
+- The policy is immutable after the run starts.
+- The clock is injected through a typed
+  interface. The default is `wallClock`. The test
+  is `fixedClock`.
+- The random source is injected through a typed
+  interface. The default is seeded from the run
+  id. The test is seeded with a fixed value.
+- Every file is identified by content hash. Two
+  files with the same content have the same hash.
+- Every checkpoint is content addressed. Two
+  checkpoints with the same payload have the same
+  id.
+- Every model call has a temperature. The default
+  is 0. The router rejects a call with
+  temperature > 0 unless the call is wrapped in a
+  tagged section.
+- The replay of any run produces an equivalent
+  audit log for every step that does not involve
+  the model.
+- The diff of two runs of the same plan produces
+  a unified diff over the audit log.
+- The system runs identically on two hosts given
+  the same input, the same plan, the same
+  approvals, the same model, the same
+  temperature, and a fixed clock.
+
 ## 7. Merge Sequence
 
 The merge sequence follows the dependency graph. The
@@ -284,6 +320,15 @@ criteria are met.
 - The audit log is hash-chained and verifiable.
 - The CLI runs the end-to-end flow without
   crashes.
+- The replay of any run produces an equivalent
+  audit log for every step that does not involve
+  the model.
+- The diff of two runs of the same plan
+  produces a unified diff over the audit log.
+- The system runs identically on two hosts given
+  the same input, the same plan, the same
+  approvals, the same model, the same
+  temperature, and a fixed clock.
 
 ## 9. Rollback Plan
 

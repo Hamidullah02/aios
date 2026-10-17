@@ -36,12 +36,24 @@ document.
 | Allow list | A list of approved hosts. |
 | Header rewriting | The replacement of headers in the request or the response. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+Network is the only source of non-determinism. The proxy is a pure function of the policy and the request.
+
+The module provides the following determinism guarantees.
+
+- Proxy decisions are pure functions of the policy and the request.
+
+- Policy is content addressed.
+## 6. User Personas
 
 The user persona is a Go developer who needs to
 control the network traffic.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to allow a specific host. The
 developer adds the host to the allow list. The proxy
@@ -55,7 +67,7 @@ A developer wants to rewrite a header. The developer
 adds a rule to the proxy. The proxy rewrites the
 header.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-egress module provides the following
 functions.
@@ -65,7 +77,7 @@ functions.
 - The header rewriting.
 - The audit log integration.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, net/http (stdlib), and the
@@ -73,7 +85,7 @@ functions.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The proxy forwards the traffic to allowed hosts.
 - The proxy denies the traffic to disallowed hosts.
@@ -81,7 +93,7 @@ functions.
 - The proxy writes the audit row.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the proxy.
 - The remote access to the proxy.

@@ -228,7 +228,70 @@ the per-task budget.
 shall update the strategy from the result quality.
 The loop shall support the `auto_escalate` flag.
 
-## 16. Non-Functional Requirements
+## 16. Determinism Requirements
+
+**REQ-GLB-DET-101** The plan object shall be
+immutable after the orchestrator dispatches the
+first task. The plan object shall be content
+addressed. The plan id shall be the SHA-256 of
+the plan payload.
+
+**REQ-GLB-DET-102** The policy object shall be
+immutable after the run starts. The policy
+object shall be content addressed. The policy
+id shall be the SHA-256 of the policy payload.
+
+**REQ-GLB-DET-103** The clock shall be injected
+through a typed interface. The interface shall
+expose `Now() time.Time`. The default
+implementation shall use the wall clock. The
+test implementation shall use a fixed clock.
+
+**REQ-GLB-DET-104** The file system shall be
+identified by content hash. The hash shall be
+SHA-256. The hash shall be computed at the
+moment the file is written. The hash shall be
+recorded in the audit row.
+
+**REQ-GLB-DET-105** The model call shall accept
+a temperature argument. The default temperature
+shall be 0. The router shall reject any call
+with a temperature above 0 unless the call is
+wrapped in a section tagged as non-deterministic.
+
+**REQ-GLB-DET-106** The checkpoint shall be
+content addressed. The checkpoint id shall be
+the SHA-256 of the checkpoint payload. The
+checkpoint payload shall be a JSON object.
+
+**REQ-GLB-DET-107** The replay command shall
+re-execute the plan from a checkpoint. The
+replay shall use the same model adapter, the
+same model id, the same temperature, and the
+same role resolver. The replay shall produce an
+equivalent audit log for every step that does
+not involve the model.
+
+**REQ-GLB-DET-108** The diff command shall
+compare two runs of the same plan. The diff
+shall be over the audit log and the tool
+results. The diff shall be in unified diff
+format.
+
+**REQ-GLB-DET-109** The system shall be
+reproducible on a second host. Two hosts given
+the same input, the same plan, the same
+approvals, the same model, the same
+temperature, and a fixed clock shall produce
+the same audit log and the same outcome.
+
+**REQ-GLB-DET-110** The system shall not use
+the global random number generator in any
+decision path. The system shall inject a
+seeded random source. The default seed shall
+be derived from the run id.
+
+## 17. Non-Functional Requirements
 
 **REQ-GLB-NFR-001** The system shall run on Go
 1.23.
@@ -258,7 +321,7 @@ documented in STE-100 prose.
 bottom-up. The merge order is in
 `docs/README.md`.
 
-## 17. Acceptance Criteria
+## 18. Acceptance Criteria
 
 1. Every REQ in this document has a test case.
 2. The test suite has a 100 percent pass rate.
@@ -277,3 +340,10 @@ bottom-up. The merge order is in
 13. The image module reads and attaches the
     images.
 14. The optimizer module routes to the right tier.
+15. The replay of any run produces an equivalent
+    audit log for every step that does not involve
+    the model.
+16. The diff of two runs of the same plan
+    produces a unified diff over the audit log.
+17. The system rejects mid-flight changes to the
+    plan and to the policy.

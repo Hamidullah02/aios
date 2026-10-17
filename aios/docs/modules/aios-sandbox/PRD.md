@@ -35,12 +35,24 @@ document.
 | Resource limit | A maximum value for CPU, memory, or time. |
 | Path isolation | A restriction on the paths the process can access. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+Wall clock and process scheduling are the only sources of non-determinism. The sandbox is content addressed at the file level.
+
+The module provides the following determinism guarantees.
+
+- Sandbox creation is reproducible given the same image and config.
+
+- Resource limits are deterministic for a fixed clock.
+## 6. User Personas
 
 The user persona is a Go developer who needs to
 run untrusted code.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to run a shell command. The
 developer passes the command to the sandbox. The
@@ -55,7 +67,7 @@ A developer wants to isolate the file system. The
 developer passes the workspace to the sandbox. The
 sandbox limits the access to the workspace.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-sandbox module provides the following
 functions.
@@ -64,7 +76,7 @@ functions.
 - The resource limits.
 - The path isolation.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends only on aios-core and the Go
@@ -72,14 +84,14 @@ functions.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The runner runs a command.
 - The resource limits are enforced.
 - The path isolation is enforced.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The user interface for the sandbox.
 - The remote access to the sandbox.

@@ -42,14 +42,28 @@ The aios-core module is not in scope for this document.
 | Redaction | The replacement of a secret value with a placeholder in an audit row. |
 | Hash chain | A sequence of records where each record includes the hash of the previous record. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Highly deterministic**.
+
+Schemas, audit log, state machine, and redaction are pure data structures. No external IO. No wall clock in the data path.
+
+The module provides the following determinism guarantees.
+
+- Schemas are content addressed.
+
+- Audit rows are content addressed.
+
+- State transitions are pure functions of the current state and the event.
+## 6. User Personas
 
 The aios-core module has no direct end users. The
 consumers of the module are the developers of the other
 modules. The user persona is a Go developer with
 experience in struct + go-playground/validator (or hand-rolled tag validation) and SQLite.
 
-## 6. User Stories
+## 7. User Stories
 
 A developer wants to validate a task plan. The developer
 imports the TaskPlan type from aios-core. The developer
@@ -66,7 +80,7 @@ A developer wants to find every audit row for one task.
 The developer passes the task identifier to the audit
 log. The audit log returns a list of rows in time order.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-core module provides the following functions.
 
@@ -84,7 +98,7 @@ The aios-core module provides the following functions.
 - A DecisionTrace writer that writes a typed trace on
   every decision.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 The aios-core module has the following non-functional
 requirements.
@@ -100,7 +114,7 @@ requirements.
 - The module has a maximum latency of 50 milliseconds
   for a single state transition.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 The aios-core module is successful when the following
 conditions are met.
@@ -116,7 +130,7 @@ conditions are met.
 - The test suite has 100 percent coverage for the
   public functions.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 The aios-core module does not include the following
 functions. The functions are in other modules.
@@ -126,7 +140,7 @@ functions. The functions are in other modules.
 - The replication of the audit log across hosts.
 - The retention policy for the audit log.
 
-## 11. Open Questions
+## 12. Open Questions
 
 The following questions are open. The project will
 resolve the questions before the implementation phase.

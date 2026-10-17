@@ -261,7 +261,120 @@ The cross-module data flow has the following shape.
 18. The orchestrator writes the report. The report
     is in `github.com/<org>/aios/internal/report`.
 
-## 8. Shared Data Structures
+## 8. Determinism Architecture
+
+The aios project is built so that every part of
+the system that is not the model, the clock, the
+network, or the operator is a pure function of
+its inputs. The cross-cutting mechanism is
+described in this section.
+
+### 8.1 The Non-Determinism Budget
+
+The system has exactly four sources of
+non-determinism. Every other part of the system
+is deterministic by construction. The four sources
+are listed below.
+
+- The model output. The model is a stochastic
+  sampler. The non-determinism is bounded by
+  `temperature=0`. The cascade and the quality
+  feedback loop handle the residual variance.
+- The wall clock. The clock is non-deterministic
+  for ordering and for timeouts. The clock is
+  injected through a typed interface. The audit
+  log records every clock read.
+- The network. The network is non-deterministic
+  for latency and for failure. The retry policy
+  and the policy gateway handle the variance.
+- The operator. The operator is non-deterministic
+  for approvals. The auto-allow rules and the
+  approval templates handle the variance.
+
+### 8.2 Content-Addressed Values
+
+The system uses content addressing for the values
+that must be stable across runs. The values are
+listed below.
+
+- The plan is content addressed. The plan id is
+  the SHA-256 of the plan payload.
+- The policy is content addressed. The policy id
+  is the SHA-256 of the policy payload.
+- The checkpoint is content addressed. The
+  checkpoint id is the SHA-256 of the checkpoint
+  payload.
+- The role is content addressed. The role id is
+  the SHA-256 of the role payload.
+- The audit row is content addressed. The row
+  hash is the SHA-256 of the row payload.
+
+### 8.3 The Clock Interface
+
+The clock is a typed interface. The interface is
+listed below.
+
+```go
+// Clock returns the current time.
+type Clock interface {
+    Now() time.Time
+}
+
+// wallClock is the production implementation.
+type wallClock struct{}
+
+func (wallClock) Now() time.Time { return time.Now() }
+
+// fixedClock is the test implementation.
+type fixedClock struct{ t time.Time }
+
+func (f fixedClock) Now() time.Time { return f.t }
+```
+
+Every module that reads the clock accepts a
+`Clock` argument. The default constructor
+wires in `wallClock`. The test constructor wires
+in `fixedClock` with a fixed timestamp.
+
+### 8.4 The Random Interface
+
+The random source is a typed interface. The
+interface is listed below.
+
+```go
+// Random returns a seeded random source.
+type Random interface {
+    Intn(n int) int
+    Float64() float64
+}
+```
+
+Every module that uses randomness accepts a
+`Random` argument. The default constructor
+wires in a source seeded from the run id. The
+test constructor wires in a source with a fixed
+seed.
+
+### 8.5 The Replay Engine
+
+The replay engine re-executes a plan from a
+checkpoint. The replay engine is a function that
+takes a checkpoint id and a model adapter. The
+function returns the new audit log.
+
+The replay engine is a pure function. The
+function is deterministic for every input that
+does not involve the model. The function
+re-executes the plan in the same order. The
+function produces the same audit log entries
+for the same tool calls.
+
+The replay engine is the unit of determinism.
+The user can replay any run by passing the
+checkpoint id. The user can diff two runs by
+passing two checkpoint ids.
+
+## 9. Shared Data Structures
 
 The shared data structures are the types that flow
 between modules. The types are listed below.
@@ -333,7 +446,7 @@ prompt, the tools, the model tier, the output
 format, the temperature, the max tokens, and the
 stop sequences.
 
-## 9. Deployment Topology
+## 10. Deployment Topology
 
 The aios project is currently in the design phase.
 The current layout is the documentation set. The
@@ -417,7 +530,7 @@ The deployment is a single Linux host. The host runs
 Docker. The host runs the Go monorepo. The host
 runs the CLI.
 
-## 10. Build and Test Pipeline
+## 11. Build and Test Pipeline
 
 The build and test pipeline has the following steps.
 
@@ -438,7 +551,7 @@ The pipeline runs in a CI environment. The CI
 environment is GitHub Actions or a self-hosted
 runner.
 
-## 11. Observability
+## 12. Observability
 
 The aios project has three observability surfaces.
 
@@ -461,45 +574,45 @@ The watcher is the live observability surface. The
 watcher streams the events to the CLI. The watcher
 is in `github.com/<org>/aios/internal/watch`.
 
-## 12. Security Posture
+## 13. Security Posture
 
 The aios project has the following security posture.
 
-### 12.1 Enforcement Below the Model
+### 13.1 Enforcement Below the Model
 
 Every tool call goes through the policy gateway.
 The policy gateway is ordinary code outside the
 model. The model cannot bypass the policy gateway.
 
-### 12.2 Sandboxing
+### 13.2 Sandboxing
 
 Every task runs in a sandbox. The sandbox isolates
 the file system, the network, and the process. The
 sandbox is in `github.com/<org>/aios/internal/sandbox`.
 
-### 12.3 Egress Control
+### 13.3 Egress Control
 
 The egress proxy controls the network traffic. The
 proxy blocks the network by default. The proxy
 allows the network through the policy.
 
-### 12.4 Approval Queue
+### 13.4 Approval Queue
 
 The approval queue pauses the run on tier-3
 actions. The queue blocks until the operator
 responds.
 
-### 12.5 Redaction
+### 13.5 Redaction
 
 The redaction layer strips secrets before any log
 write. The layer is in `github.com/<org>/aios/internal/core`.
 
-### 12.6 Audit Log
+### 13.6 Audit Log
 
 The audit log is append-only and hash-chained.
 The log is verifiable through the hash chain.
 
-## 13. Risks and Mitigations
+## 14. Risks and Mitigations
 
 | Risk | Impact | Probability | Mitigation |
 | --- | --- | --- | --- |
@@ -510,8 +623,11 @@ The log is verifiable through the hash chain.
 | The hash chain breaks. | High | Low | The re-anchor tool repairs the chain. The audit log is backed up. |
 | The sandbox is bypassed. | High | Low | The sandbox is tested in isolation. The escape attempts are logged. |
 | The egress proxy is bypassed. | High | Low | The egress proxy is tested in isolation. The DNS is monitored. |
+| The model drifts between runs. | High | Medium | The temperature is 0. The cascade escalates. The quality feedback updates the strategy. The drift is recorded in the audit log. |
+| The replay diverges from the original. | High | Low | The checkpoints are content addressed. The plan and the policy are immutable. The replay is re-execution from the same input. |
+| The diff is too large to inspect. | Medium | Medium | The diff is in unified format. The report summarizes the diff. The search tool filters the diff. |
 
-## 14. Version
+## 15. Version
 
 This document is version 1.0. The previous version
 was 0.9. The change is the addition of the

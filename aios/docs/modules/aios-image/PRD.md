@@ -42,14 +42,26 @@ document.
 | Structured output | A typed object that holds the schema-constrained response. |
 | JSON Schema (github.com/santhosh-tekuri/jsonschema/v5) | A specification for the shape of a JSON value. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+File system and the model are the only sources of non-determinism. The image read tool is content addressed.
+
+The module provides the following determinism guarantees.
+
+- Images are content addressed.
+
+- Structured output is validated against a schema.
+## 6. User Personas
 
 The user persona is the agent that needs to read an
 image. The agent wants to attach the image to the
 next model call. The agent wants the model to
 return a structured response.
 
-## 6. User Stories
+## 7. User Stories
 
 An agent wants to read an image. The agent calls
 the image read tool. The tool returns the image
@@ -61,7 +73,7 @@ passes the schema to the model. The model returns
 the response in the schema. The agent validates
 the response.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-image module provides the following
 functions.
@@ -71,7 +83,7 @@ functions.
 - The structured output validator.
 - The schema-constrained generation.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-tools, and
@@ -79,7 +91,7 @@ functions.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The image read tool returns the image data.
 - The image attach API attaches the image to the
@@ -89,7 +101,7 @@ functions.
 - The schema-constrained generation works.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The image generation.
 - The image editing.

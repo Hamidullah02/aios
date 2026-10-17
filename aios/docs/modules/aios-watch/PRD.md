@@ -40,14 +40,26 @@ document.
 | Sub-agent | A child agent that runs in its own context. |
 | Task tool | A tool that spawns a sub-agent. |
 
-## 5. User Personas
+
+## 5. Determinism
+
+The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Bounded non-determinism**.
+
+The file system and the wall clock are the only sources of non-determinism. The event format is deterministic.
+
+The module provides the following determinism guarantees.
+
+- Events are content addressed.
+
+- The watcher is a pure function of the file system and the clock.
+## 6. User Personas
 
 The user persona is the operator who watches the
 agent work. The operator wants to see the model
 output as it streams. The operator wants to see
 which files the agent changes.
 
-## 6. User Stories
+## 7. User Stories
 
 An operator wants to see the model output. The CLI
 shows the output as the model streams. The CLI
@@ -61,7 +73,7 @@ An agent wants to delegate a research task. The
 agent calls the Task tool. The Task tool spawns a
 sub-agent. The sub-agent returns the result.
 
-## 7. Functional Requirements Summary
+## 8. Functional Requirements Summary
 
 The aios-watch module provides the following
 functions.
@@ -70,7 +82,7 @@ functions.
 - The file watcher tool.
 - The sub-agent Task tool.
 
-## 8. Non-Functional Requirements Summary
+## 9. Non-Functional Requirements Summary
 
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-models, and
@@ -78,14 +90,14 @@ functions.
 - The module has 100 percent test coverage for the
   public functions.
 
-## 9. Success Criteria
+## 10. Success Criteria
 
 - The streaming channel streams model chunks.
 - The file watcher detects file changes.
 - The Task tool spawns a sub-agent.
 - The test suite has a 100 percent pass rate.
 
-## 10. Out of Scope
+## 11. Out of Scope
 
 - The web interface for the stream.
 - The mobile interface for the stream.
