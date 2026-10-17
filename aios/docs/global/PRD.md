@@ -79,8 +79,8 @@ The non-determinism budget is listed below.
 
 - The model output is non-deterministic. The
   budget for the model is `temperature=0`. The
-  budget for variance is the cascade and the
-  quality feedback loop.
+  budget for variance is the call fingerprint
+  and the cost/quality table.
 - The wall clock is non-deterministic. The budget
   for the clock is the audit timestamp. The
   budget for timing is the timeout policy.
@@ -230,6 +230,8 @@ under each function.
 - The model adapter layer. The function is in
   `github.com/<org>/aios/internal/models`.
 - The model router with cost optimization. The
+  router is a pure function of the cost/quality
+  table, the override, and the budget. The
   function is in `github.com/<org>/aios/internal/optimizer`.
 - The approval service. The function is in
   `github.com/<org>/aios/internal/approvals`.
@@ -522,7 +524,7 @@ are tracked in the implementation plan.
 
 - The model quality is below the threshold for
   some tasks. The mitigation is the model router
-  and the cascade mode.
+  and the cost/quality table.
 - The cost is above the budget. The mitigation is
   the cost tracker and the budget meter.
 - The approval fatigue makes the operator ignore
@@ -534,9 +536,9 @@ are tracked in the implementation plan.
 - The hash chain breaks. The mitigation is the
   re-anchor tool and the audit log repair.
 - The model drifts between runs. The mitigation is
-  `temperature=0` plus the cascade plus the
-  quality feedback loop. The drift is recorded in
-  the audit log.
+  `temperature=0` plus the call fingerprint plus
+  the cost/quality table. The drift is recorded
+  in the audit log.
 - The replay diverges from the original run. The
   mitigation is the content-addressed checkpoints
   and the immutable plan.

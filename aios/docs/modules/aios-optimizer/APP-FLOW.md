@@ -8,7 +8,7 @@ aios-optimizer module.
 ## 2. Scope
 
 The scope of this document is the aios-optimizer
-module. The module is a library.
+module. The module is a Go package.
 
 ## 3. Reference Documents
 
@@ -24,10 +24,16 @@ module. The module is a library.
 | Term | Definition |
 | --- | --- |
 | Caller | The code that calls the router. |
+| Operator | The developer who runs the CLI. |
 
 ## 5. User Flow
 
-The aios-optimizer module has no user-facing flow.
+The user flow for the optimizer is the `aios stats`
+CLI. The operator types `aios stats` to see the
+cost/quality table. The operator types
+`aios stats --fingerprint=<hash>` to see a single
+row. The operator types `aios stats --reset` to
+clear the table.
 
 ## 6. System Flow
 
@@ -35,39 +41,52 @@ The aios-optimizer module has no user-facing flow.
 
 The route flow runs as follows.
 
-1. The caller calls `strategy.route` with the task.
-2. The strategy extracts the features.
-3. The strategy calls the classifier.
-4. The classifier returns the tier and the
-   confidence.
-5. The strategy calls the cost tracker.
-6. The cost tracker returns the budget status.
-7. The strategy applies the budget-aware check.
-8. The strategy returns the routing decision.
+1. The caller calls `router.Route` with the
+   fingerprint, the override, and the budget.
+2. The router checks the override.
+3. When the override is `off`, the router returns
+   the strong tier.
+4. When the override is `strong`, `medium`, or
+   `weak`, the router returns the override tier.
+5. The router looks up the fingerprint in the
+   table.
+6. When the fingerprint is in the table for two
+   or more tiers, the router returns the tier
+   with the highest score.
+7. When the fingerprint is not in the table, the
+   router uses the default rule.
+8. The router enforces the budget.
+9. The router returns the decision.
 
-### 6.2 Cascade Flow
+### 6.2 Record Flow
 
-The cascade flow runs as follows.
+The record flow runs as follows.
 
-1. The strategy tries the weak tier.
-2. The strategy computes the confidence.
-3. When the confidence is below the threshold,
-   the strategy escalates to the medium tier.
-4. When the medium tier is below the threshold,
-   the strategy escalates to the strong tier.
-5. The strategy returns the final decision.
+1. The caller calls `table.Record` with the
+   fingerprint, the tier, the cost, and the
+   verify result.
+2. The table updates the in-memory row.
+3. The table writes the file atomically.
+4. The table returns nil.
 
-### 6.3 Feedback Flow
+### 6.3 Reset Flow
 
-The feedback flow runs as follows.
+The reset flow runs as follows.
 
-1. The caller calls `feedback.record` with the
-   result.
-2. The feedback records the result quality.
-3. The feedback updates the strategy.
-4. When the auto-escalate flag is set and the
-   quality is below the threshold, the feedback
-   escalates the tier for similar tasks.
+1. The operator types `aios stats --reset`.
+2. The CLI calls `table.Reset`.
+3. The table clears the in-memory rows.
+4. The table writes the empty table to the file.
+5. The CLI returns success.
+
+### 6.4 Stats Flow
+
+The stats flow runs as follows.
+
+1. The operator types `aios stats`.
+2. The CLI reads the table from the file.
+3. The CLI prints the table as JSON.
+4. The CLI prints the summary.
 
 ## 7. Error Flows
 
@@ -75,20 +94,25 @@ The feedback flow runs as follows.
 
 The budget exhausted flow runs as follows.
 
-1. The cost tracker exhausts the budget.
-2. The tracker raises `BudgetExhausted`.
-3. The caller catches the error.
-4. The caller stops the task.
+1. The budget is exhausted.
+2. The router returns `ErrBudgetExhausted`.
+3. The caller stops the run.
 
 ### 7.2 Unknown Tier
 
 The unknown tier flow runs as follows.
 
-1. The strategy returns a tier that is not in the
-   registry.
-2. The registry raises `UnknownTier`.
-3. The caller catches the error.
-4. The caller reports the error.
+1. The override is not a known tier.
+2. The router returns `ErrUnknownTier`.
+3. The caller reports the error.
+
+### 7.3 Table Corrupt
+
+The table corrupt flow runs as follows.
+
+1. The file fails to parse.
+2. The table returns `ErrTableCorrupt`.
+3. The caller reports the error.
 
 ## 8. Sequence Diagrams
 
@@ -96,7 +120,18 @@ The unknown tier flow runs as follows.
 
 The route sequence has the steps below.
 
-1. The caller calls `strategy.route`.
-2. The strategy calls the classifier.
-3. The strategy calls the cost tracker.
-4. The strategy returns the decision.
+1. The caller calls `router.Route`.
+2. The router checks the override.
+3. The router looks up the fingerprint in the
+   table.
+4. The router enforces the budget.
+5. The router returns the decision.
+
+### 8.2 Record Sequence
+
+The record sequence has the steps below.
+
+1. The caller calls `table.Record`.
+2. The table updates the in-memory row.
+3. The table writes the file atomically.
+4. The table returns nil.

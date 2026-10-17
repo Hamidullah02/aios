@@ -8,8 +8,8 @@ aios-optimizer module.
 ## 2. Scope
 
 The scope of this document is the aios-optimizer
-module. The module depends on aios-core and
-aios-models.
+module. The module depends on aios-core,
+aios-models, and aios-verify.
 
 ## 3. Reference Documents
 
@@ -21,6 +21,8 @@ aios-models.
   `docs/modules/aios-optimizer/TRD.md`.
 - aios-optimizer Application Flow. See
   `docs/modules/aios-optimizer/APP-FLOW.md`.
+- aios-optimizer Wireframes. See
+  `docs/modules/aios-optimizer/WIREFRAMES.md`.
 
 ## 4. Definitions
 
@@ -40,60 +42,85 @@ The deliverable is the project skeleton.
 
 ### Phase 2: Tiered Model Registry
 
-1. Create the file `internal/optimizer/registry.py`.
-2. Create the file `tests/test_registry.py`.
-3. Implement the `TieredModelRegistry` class.
+1. Create the file
+  `internal/optimizer/registry.go`.
+2. Create the file `tests/registry_test.go`.
+3. Implement the `TieredModelRegistry` type.
 4. Implement the YAML loader.
 5. Write the test cases.
 
 The deliverable is the registry with tests.
 
-### Phase 3: Task Classifier
+### Phase 3: Call Fingerprint
 
-1. Create the file `internal/optimizer/classifier.py`.
-2. Create the file `tests/test_classifier.py`.
-3. Implement the `TaskClassifier` class.
-4. Implement the strategies.
+1. Create the file
+  `internal/optimizer/fingerprint.go`.
+2. Create the file `tests/fingerprint_test.go`.
+3. Implement the `NewFingerprint` function.
+4. Implement the prompt shape function.
+5. Implement the context length bucket function.
+6. Write the test cases.
+
+The deliverable is the fingerprint with tests.
+
+### Phase 4: Cost/Quality Table
+
+1. Create the file `internal/optimizer/table.go`.
+2. Create the file `tests/table_test.go`.
+3. Implement the `CostQualityTable` type.
+4. Implement the atomic write.
+5. Implement the `Get`, `Record`, and `Reset`
+   methods.
+6. Write the test cases.
+
+The deliverable is the table with tests.
+
+### Phase 5: Router
+
+1. Create the file `internal/optimizer/router.go`.
+2. Create the file `tests/router_test.go`.
+3. Implement the `Router` type.
+4. Implement the `Route` method.
 5. Write the test cases.
 
-The deliverable is the classifier with tests.
+The deliverable is the router with tests.
 
-### Phase 4: Cost Tracker
+### Phase 6: CLI Subcommand
 
-1. Create the file `internal/optimizer/cost_tracker.py`.
-2. Create the file `tests/test_cost_tracker.py`.
-3. Implement the `CostTracker` class.
-4. Implement the budget enforcement.
-5. Write the test cases.
+1. Create the file `internal/optimizer/cli.go`.
+2. Create the file `tests/cli_test.go`.
+3. Implement the `aios stats` subcommand.
+4. Implement the `--fingerprint` flag.
+5. Implement the `--tier` flag.
+6. Implement the `--reset` flag.
+7. Write the test cases.
 
-The deliverable is the cost tracker with tests.
+The deliverable is the CLI with tests.
 
-### Phase 5: Routing Strategy
+### Phase 7: Runtime Integration
 
-1. Create the file `internal/optimizer/strategy.py`.
-2. Create the file `tests/test_strategy.py`.
-3. Implement the `RoutingStrategy` class.
-4. Implement the modes.
-5. Write the test cases.
+1. Create the file
+  `internal/optimizer/integration.go`.
+2. Create the file `tests/integration_test.go`.
+3. Implement the integration with aios-runtime.
+4. Implement the `--tier` flag on `aios run`.
+5. Implement the `--optimizer` flag on `aios
+   run`.
+6. Implement the `--budget` flag on `aios run`.
+7. Write the test cases.
 
-The deliverable is the strategy with tests.
+The deliverable is the runtime integration with
+tests.
 
-### Phase 6: Quality Feedback
+### Phase 8: Quality Gates
 
-1. Create the file `internal/optimizer/feedback.py`.
-2. Create the file `tests/test_feedback.py`.
-3. Implement the `QualityFeedback` class.
-4. Write the test cases.
-
-The deliverable is the feedback with tests.
-
-### Phase 7: Quality Gates
-
-1. Run the test suite with `go test`.
-2. Run the coverage report with `go test -cover`.
-3. Run the type check with `go vet ./internal/optimizer`.
-4. Run the linter with `gofmt + go vet check`.
-5. Fix every failure.
+1. Run the test suite with `go test ./...`.
+2. Run the coverage report with
+   `go test -cover ./...`.
+3. Run the type check with `go vet ./...`.
+4. Run the linter with `staticcheck ./...`.
+5. Run the formatter with `gofmt -l .`.
+6. Fix every failure.
 
 The deliverable is a green test suite.
 
@@ -103,33 +130,63 @@ The deliverable is a green test suite.
 - The test files in `tests/`.
 - The `go.mod` file.
 - The `README.md` file.
-- A sample optimizer file in `examples/`.
+- A sample `var/optimizer.yaml` file.
+- A sample `var/optimizer.json` file.
 
 ## 7. Test Plan
 
 ### 7.1 Unit Tests
 
-- `tests/test_registry.py` covers
-  `internal/optimizer/registry.py`.
-- `tests/test_classifier.py` covers
-  `internal/optimizer/classifier.py`.
-- `tests/test_cost_tracker.py` covers
-  `internal/optimizer/cost_tracker.py`.
-- `tests/test_strategy.py` covers
-  `internal/optimizer/strategy.py`.
-- `tests/test_feedback.py` covers
-  `internal/optimizer/feedback.py`.
+- `tests/registry_test.go` covers
+  `internal/optimizer/registry.go`.
+- `tests/fingerprint_test.go` covers
+  `internal/optimizer/fingerprint.go`.
+- `tests/table_test.go` covers
+  `internal/optimizer/table.go`.
+- `tests/router_test.go` covers
+  `internal/optimizer/router.go`.
+- `tests/cli_test.go` covers
+  `internal/optimizer/cli.go`.
+- `tests/integration_test.go` covers
+  `internal/optimizer/integration.go`.
 
 ### 7.2 Test Cases
 
 The test cases include the following items.
 
 - The registry loads the tiers.
-- The classifier returns the right tier.
-- The cost tracker records the cost.
-- The strategy picks the model.
-- The cascade mode escalates.
-- The feedback updates the strategy.
+- The registry returns `ErrUnknownTier` for an
+  unknown tier.
+- The fingerprint is a pure function. Two calls
+  with the same inputs return the same
+  fingerprint.
+- The fingerprint differs when the prompt shape
+  differs.
+- The fingerprint differs when the tool set
+  differs.
+- The fingerprint differs when the role differs.
+- The fingerprint differs when the context
+  length bucket differs.
+- The table loads from the file.
+- The table writes to the file atomically.
+- The table records the pass count and the
+  total cost.
+- The table resets to empty.
+- The router returns the override tier when the
+  override is set.
+- The router returns the strong tier when the
+  override is `off`.
+- The router returns the highest-score tier
+  when the fingerprint is in the table.
+- The router returns the weakest tier when the
+  fingerprint is not in the table.
+- The router returns `ErrBudgetExhausted` when
+  the budget is exhausted.
+- The `aios stats` subcommand prints the table.
+- The `aios stats --fingerprint=<hash>`
+  subcommand filters the table.
+- The `aios stats --reset` subcommand clears
+  the table.
 
 ## 8. Merge Plan
 
@@ -138,15 +195,15 @@ The test cases include the following items.
 1. The test suite has a 100 percent pass rate.
 2. The coverage report shows 100 percent coverage
    for the public functions.
-3. The `go vet` report shows no errors.
-4. The `gofmt + go vet` report shows no errors.
+3. The `go vet` report is clean.
+4. The `staticcheck` report is clean.
+5. The `gofmt` report is clean.
 
 ### 8.2 Merge Steps
 
 1. Create a branch named `merge/aios-optimizer`.
-2. Move the files from `modules/aios-optimizer/`
-   to the target locations in the main
-   repository.
+2. Move the files from `internal/optimizer/` to
+   the target locations in the main repository.
 3. Run the test suite on the main repository.
 4. Open a pull request.
 5. Merge after the review is approved.
@@ -155,20 +212,24 @@ The test cases include the following items.
 
 | Risk | Impact | Probability | Mitigation |
 | --- | --- | --- | --- |
-| The classifier picks the wrong tier. | High | Medium | The cascade mode escalates on low confidence. |
-| The cost tracker misses a call. | High | Low | The tracker wraps the model router. |
-| The learned classifier is stale. | Medium | Medium | The classifier is retrained on a regular schedule. |
+| The fingerprint is too coarse. | Medium | Medium | The fingerprint includes the prompt shape, the tool set, the role, and the context length bucket. The developer can override per call. |
+| The fingerprint is too fine. | Low | High | The table grows without bound. The developer can clear the table with `aios stats --reset`. |
+| The pass rate is misleading. | High | Low | The pass rate is the empirical verify result. The developer can inspect the table. |
+| The table write is not atomic. | High | Low | The table writes through a `rename` syscall. The write is atomic on POSIX file systems. |
+| The budget is exceeded. | High | Low | The router enforces the budget. The router returns `ErrBudgetExhausted`. |
+| The override is wrong. | Low | Medium | The override is recorded in the audit log. The developer can see the override count. |
 
 ## 10. Schedule
 
 | Phase | Duration | Dependency |
 | --- | --- | --- |
-| Phase 1: Project Skeleton | 1 day | nil |
+| Phase 1: Project Skeleton | 1 day | None |
 | Phase 2: Tiered Model Registry | 1 day | Phase 1 |
-| Phase 3: Task Classifier | 2 days | Phase 1 |
-| Phase 4: Cost Tracker | 1 day | Phase 1 |
-| Phase 5: Routing Strategy | 2 days | Phase 2, Phase 3, Phase 4 |
-| Phase 6: Quality Feedback | 1 day | Phase 5 |
-| Phase 7: Quality Gates | 1 day | All phases |
+| Phase 3: Call Fingerprint | 2 days | Phase 1 |
+| Phase 4: Cost/Quality Table | 2 days | Phase 1 |
+| Phase 5: Router | 2 days | Phase 2, Phase 3, Phase 4 |
+| Phase 6: CLI Subcommand | 1 day | Phase 4 |
+| Phase 7: Runtime Integration | 2 days | Phase 5, Phase 6 |
+| Phase 8: Quality Gates | 1 day | All phases |
 
-The total duration is 9 days.
+The total duration is 12 days.

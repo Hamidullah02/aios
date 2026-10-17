@@ -227,10 +227,12 @@ The test cases for the image are listed below.
 
 The test cases for the optimizer are listed below.
 
-- The model router picks the right tier.
-- The cost tracker records the cost.
-- The quality feedback updates the strategy.
-- The cascade mode escalates on low confidence.
+- The model router picks the cheapest tier that
+  the verify layer accepts.
+- The cost tracker records the empirical cost.
+- The cost/quality table records the empirical
+  pass rate.
+- The override surface works for every call.
 
 ### 6.12 Determinism Tests
 

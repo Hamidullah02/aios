@@ -216,17 +216,28 @@ or a struct.
 ## 15. Optimizer Requirements
 
 **REQ-GLB-OPT-001** The model router shall pick
-the right tier for each task. The router shall
-support the following modes: `static`, `dynamic`,
-`cascade`.
+the cheapest tier that the verify layer will
+accept. The router shall be a pure function of
+the cost/quality table, the override, and the
+budget.
 
 **REQ-GLB-OPT-002** The cost tracker shall record
-the cost for every call. The tracker shall enforce
-the per-task budget.
+the empirical cost for every call. The tracker
+shall enforce the per-task budget.
 
-**REQ-GLB-OPT-003** The quality feedback loop
-shall update the strategy from the result quality.
-The loop shall support the `auto_escalate` flag.
+**REQ-GLB-OPT-003** The cost/quality table shall
+record the empirical pass rate per
+(fingerprint, tier) pair. The pass rate shall
+come from the verify result, not from the model
+self-evaluation.
+
+**REQ-GLB-OPT-004** The router shall support the
+override surface. The CLI shall accept the
+`--tier`, `--optimizer`, and `--budget` flags.
+
+**REQ-GLB-OPT-005** The router shall never ask
+the model to grade itself. The pass rate shall
+always be derived from the verify result.
 
 ## 16. Determinism Requirements
 

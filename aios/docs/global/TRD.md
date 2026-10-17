@@ -278,8 +278,8 @@ are listed below.
 
 - The model output. The model is a stochastic
   sampler. The non-determinism is bounded by
-  `temperature=0`. The cascade and the quality
-  feedback loop handle the residual variance.
+  `temperature=0`. The call fingerprint and the
+  cost/quality table handle the residual variance.
 - The wall clock. The clock is non-deterministic
   for ordering and for timeouts. The clock is
   injected through a typed interface. The audit
@@ -616,14 +616,14 @@ The log is verifiable through the hash chain.
 
 | Risk | Impact | Probability | Mitigation |
 | --- | --- | --- | --- |
-| The model quality is below the threshold. | High | Medium | The model router picks the right tier. The cascade mode escalates. The quality feedback updates the strategy. |
+| The model quality is below the threshold. | High | Medium | The model router picks the cheapest tier that the verify layer accepts. The cost/quality table tracks the empirical pass rate. |
 | The cost is above the budget. | High | Medium | The cost tracker enforces the budget. The router picks the cheapest tier. |
 | The approval fatigue is too high. | Medium | High | The auto-allow rules reduce the prompts. The policy templates cover the common cases. |
 | The audit log is too large. | Medium | Medium | The report summarizes the run. The search tool finds the events. |
 | The hash chain breaks. | High | Low | The re-anchor tool repairs the chain. The audit log is backed up. |
 | The sandbox is bypassed. | High | Low | The sandbox is tested in isolation. The escape attempts are logged. |
 | The egress proxy is bypassed. | High | Low | The egress proxy is tested in isolation. The DNS is monitored. |
-| The model drifts between runs. | High | Medium | The temperature is 0. The cascade escalates. The quality feedback updates the strategy. The drift is recorded in the audit log. |
+| The model drifts between runs. | High | Medium | The temperature is 0. The call fingerprint and the cost/quality table learn the empirical pass rate. The drift is recorded in the audit log. |
 | The replay diverges from the original. | High | Low | The checkpoints are content addressed. The plan and the policy are immutable. The replay is re-execution from the same input. |
 | The diff is too large to inspect. | Medium | Medium | The diff is in unified format. The report summarizes the diff. The search tool filters the diff. |
 
