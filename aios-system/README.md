@@ -26,6 +26,8 @@ aios-system/
     report/                 aios-report module (Group 2)
     benchmark/              aios-benchmark module (Group 2)
     memory/                 aios-memory module (Group 2)
+    runtime/                aios-runtime module (Group 2)
+    fanout/                 aios-fanout module (Group 2)
   tests/                    Black-box tests
 ```
 

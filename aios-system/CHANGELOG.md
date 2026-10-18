@@ -1,5 +1,155 @@
 # Changelog
 
+## v0.23.0 — wire built modules into the CLI + report bridge
+
+The previous release (`v0.21.0`) wired the bus into
+production code via `BusWorker` and fixed two
+silent error swallows in `BuildDeps`. This release
+closes the next layer of the wire audit: the
+modules the doc set describes are now reachable
+from the operator's command line, and the report
+subcommand uses the `report` package's renderers
+rather than inline formatters.
+
+### New CLI subcommands
+
+- `search glob --pattern=... --path=...` — find
+  files by name glob.
+- `search grep --query=... --path=...` — content
+  search.
+- `memory query --query=...` — query the memory
+  store (uses `AIOS_SESSION_ID` for session scope).
+- `egress start --listen=addr --egress-config=path`
+  — start the egress proxy.
+- `benchmark run --dataset=path --output=path` —
+  execute a benchmark dataset through the existing
+  `benchmark.CLI`.
+- `model list --prices=path` — list configured
+  models and their per-1k prices.
+- `session list --sessions=path` — list persisted
+  session files.
+- `plan validate --plan=path` — validate a plan
+  YAML and re-encode it through the planner.
+
+### Report bridge (`internal/cli/report_bridge.go`)
+
+The previous `Report` subcommand printed audit
+log rows directly with hand-rolled JSON / Markdown
+/ HTML formatters. The new `renderReport` helper
+uses the `report` package's renderers
+(`NewJSONRenderer`, `NewMarkdownRenderer`,
+`NewHTMLRenderer`) so the renderer code is shared
+between the CLI and any other consumer. The
+`bridgeReportFromRows` adapter converts audit
+rows to the report's `Step` shape; the
+`bridgeReport` adapter converts a `runtime.Report`
+to the same shape for the `run` subcommand.
+
+### Count
+
+- Unit + integration tests: 1110 PASS, 0 FAIL,
+  1 SKIP (Windows symlink).
+- The new CLI subcommands have 13 new tests
+  covering the happy path, the no-args error, the
+  unknown-sub-action error, the missing-file path,
+  and the bad-YAML path.
+
+## v0.22.0 — aios-fanout
+
+Add the aios-fanout module. The module is the
+parallel execution layer: the sub-agent
+delegation, the parallel task execution, the
+worktree isolation, and the result merge.
+
+The package is a single Go package at
+`internal/fanout/` and depends on aios-core
+(for the audit log), aios-runtime (for the
+`Worker` interface the sub-agents implement),
+and the Go standard library. No new third-party
+dependencies.
+
+### Components
+
+- `FanOutTool` — the parallel task executor.
+  Accepts a list of tasks, spawns a sub-agent
+  for every task, runs the sub-agents in
+  parallel under a semaphore (default 4, hard
+  cap 8), and merges the results through a
+  pluggable strategy. Writes a `fanout_task`
+  audit row for every task.
+- `WorktreeIsolation` — the per-task worktree
+  wrapper. The type creates a git worktree for
+  every task when the `Isolate` flag is set,
+  changes the working directory, runs the
+  sub-agent, restores the directory, and
+  removes the worktree.
+- `ResultMerger` — the result merger. Supports
+  three strategies: `concat` (concatenation in
+  order), `summary` (caller-provided model
+  summarization through a `Summarizer`
+  interface), and `vote` (consensus by
+  content similarity, with a longest-common-
+  prefix heuristic).
+- `Scheduler` — the budgeted batch runner. The
+  scheduler splits the task list into batches
+  of `MaxParallel` and stops when the cost
+  cap (`BudgetCap.MaxCostUSD`) or the task
+  cap (`BudgetCap.MaxTasks`) is reached.
+
+### Documented substitutions (carried from the
+doc set)
+
+- `errgroup.Group` (doc-set) → `sync.WaitGroup`
+  + a buffered channel semaphore (stdlib). No
+  new third-party deps; consistent with the
+  rest of the tree.
+- `aios-git` (doc-set) → a `Worktree` interface
+  plus a bundled `ExecGitBackend` (a thin
+  `os/exec` wrapper around `git worktree`).
+  Callers may swap the backend for a real
+  aios-git implementation when that module
+  lands.
+- `aios-models` (doc-set, for the Summary
+  strategy) → a `Summarizer` interface the
+  caller provides. The default fallback is
+  Concat. This decouples the package from
+  aios-models at the import level; the
+  aios-models `Router` satisfies the
+  `Summarizer` interface.
+- `aios-watch` (doc-set) → no direct
+  dependency. The tool exposes a `Progress`
+  callback the caller may wire to the watch
+  layer.
+- The Python-style `Tool` protocol
+  (doc-set) → the `runtime.Worker` interface
+  the rest of the system already uses. A
+  sub-agent is a Worker; the `SubAgentFactory`
+  the FanOutTool accepts builds a Worker for
+  every task.
+
+### Determinism
+
+- The parallel runner is deterministic for a
+  fixed model configuration: sub-agent results
+  are content-addressed and the merge is a
+  pure function of the results and the merge
+  strategy. The `Summary` strategy is the only
+  non-deterministic path (model call); the
+  `vote` strategy's content-similarity
+  heuristic is deterministic.
+- The package is bounded by `temperature=0`,
+  per the doc-set determinism stance.
+
+### Coverage and quality gates
+
+- 27 tests pass (task/merge/worktree/fanout/
+  scheduler); 92.2% statement coverage.
+  Public functions are 100% covered.
+- `go build ./...` clean (no new third-party
+  deps).
+- `go vet ./internal/fanout/...` clean.
+- `gofmt -l internal/fanout` clean.
+
 ## v0.21.0 — end-to-end wire audit + BusWorker + BuildDeps hardening
 
 A full integration sweep against the doc set. The biggest

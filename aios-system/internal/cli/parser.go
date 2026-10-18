@@ -16,13 +16,20 @@ import (
 //	run, resume, cancel, report, daemon start, daemon stop,
 //	audit, init
 const (
-	CmdRun    = "run"
-	CmdResume = "resume"
-	CmdCancel = "cancel"
-	CmdReport = "report"
-	CmdAudit  = "audit"
-	CmdInit   = "init"
-	CmdDaemon = "daemon"
+	CmdRun       = "run"
+	CmdResume    = "resume"
+	CmdCancel    = "cancel"
+	CmdReport    = "report"
+	CmdAudit     = "audit"
+	CmdInit      = "init"
+	CmdDaemon    = "daemon"
+	CmdSearch    = "search"
+	CmdMemory    = "memory"
+	CmdEgress    = "egress"
+	CmdBenchmark = "benchmark"
+	CmdModel     = "model"
+	CmdSession   = "session"
+	CmdPlan      = "plan"
 )
 
 // DaemonSub is the sub-subcommand for the daemon. Per
@@ -54,6 +61,19 @@ type Args struct {
 	SocketPath string
 	DaemonMode bool   // true when `daemon start` is foreground
 	DaemonPID  string // pid file path for `daemon start` (default)
+
+	// Subcommand-specific fields. Used by the new
+	// subcommands (search, memory, egress, benchmark,
+	// model, session, plan).
+	Query        string
+	Pattern      string
+	Path         string
+	Limit        int
+	Listen       string
+	DatasetPath  string
+	OutputPath   string
+	PricePath    string
+	SessionsPath string
 }
 
 // Parse parses argv into Args. argv[0] is the program name
@@ -151,6 +171,25 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 		sub.BoolVar(&a.Tail, "tail", false, "follow the audit log")
 	case CmdInit:
 		// init takes no sub-flags.
+	case CmdSearch:
+		sub.StringVar(&a.Query, "query", "", "search query (grep mode)")
+		sub.StringVar(&a.Pattern, "pattern", "", "file glob (glob mode)")
+		sub.StringVar(&a.Path, "path", ".", "directory to search")
+	case CmdMemory:
+		sub.StringVar(&a.Query, "query", "", "memory query string")
+		sub.IntVar(&a.Limit, "limit", 20, "max results to print")
+	case CmdEgress:
+		sub.StringVar(&a.Listen, "listen", "127.0.0.1:8080", "address to bind")
+		sub.StringVar(&a.ConfigPath, "egress-config", "var/egress.yaml", "egress config path")
+	case CmdBenchmark:
+		sub.StringVar(&a.DatasetPath, "dataset", "./benchmark/wedge.json", "benchmark dataset")
+		sub.StringVar(&a.OutputPath, "output", "./var/benchmark-report.json", "metrics output")
+	case CmdModel:
+		sub.StringVar(&a.PricePath, "prices", "var/prices.yaml", "price table path")
+	case CmdSession:
+		sub.StringVar(&a.SessionsPath, "sessions", "", "sessions directory")
+	case CmdPlan:
+		sub.StringVar(&a.PlanPath, "plan", "", "plan YAML path")
 	case CmdDaemon:
 		// The daemon command takes start or stop as a
 		// positional arg, not as a flag.
@@ -231,6 +270,9 @@ func findSubcommandIndex(argv []string) int {
 	known := map[string]bool{
 		CmdRun: true, CmdResume: true, CmdCancel: true, CmdReport: true,
 		CmdAudit: true, CmdInit: true, CmdDaemon: true,
+		CmdSearch: true, CmdMemory: true, CmdEgress: true,
+		CmdBenchmark: true, CmdModel: true, CmdSession: true,
+		CmdPlan: true,
 	}
 	for i, a := range argv {
 		if strings.HasPrefix(a, "-") {
@@ -271,6 +313,13 @@ Subcommands:
   report <task>          Print a task report (json, markdown, html).
   audit [task]           Show the audit log; with --tail, follow.
   init                   Initialise the workspace (./var/).
+  search glob|grep       Search the workspace from the command line.
+  memory query           Query the memory store.
+  egress start           Start the egress proxy.
+  benchmark run          Run the benchmark dataset.
+  model list             List configured models.
+  session list           List persisted sessions.
+  plan validate          Validate a plan YAML file.
   daemon start           Start the approval daemon (foreground by default).
   daemon stop            Stop the approval daemon.
 
