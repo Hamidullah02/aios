@@ -23,11 +23,16 @@ aios-system/
     sandbox/                aios-sandbox module (Group 2)
     persist/                aios-persist module (Group 2)
     tools/                  aios-tools module (Group 2)
+    search/                 aios-search module (Group 2)
+    edit/                   aios-edit module (Group 2)
     report/                 aios-report module (Group 2)
     benchmark/              aios-benchmark module (Group 2)
+    roles/                  aios-roles module (Group 2)
     memory/                 aios-memory module (Group 2)
     runtime/                aios-runtime module (Group 2)
     fanout/                 aios-fanout module (Group 2)
+    verify/                 aios-verify module (Group 2)
+    watch/                  aios-watch module (Group 2)
   tests/                    Black-box tests
 ```
 
