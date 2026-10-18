@@ -75,7 +75,13 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	fs := flag.NewFlagSet("aios", flag.ContinueOnError)
 	fs.SetOutput(w)
 	fs.BoolVar(&a.Debug, "debug", false, "print the full error traceback on failure")
-	fs.StringVar(&a.ConfigPath, "config", "./var/config.yaml", "path to the config file")
+	// --config defaults to "" (no policy). Operators who
+	// want enforcement pass --config=path/to/policy.yaml;
+	// operators running a smoke test or a CI job leave it
+	// empty and the system allows every tool call. The
+	// doc set treats the policy as optional; the default
+	// must reflect that.
+	fs.StringVar(&a.ConfigPath, "config", "", "path to the config file (optional)")
 	fs.StringVar(&a.LogPath, "log", "./var/aios.log", "path to the log file")
 	fs.StringVar(&a.SocketPath, "socket", "/tmp/aios-approval.sock", "approval daemon socket path")
 	fs.StringVar(&a.DaemonPID, "pidfile", "./var/aios-daemon.pid", "path to the daemon pid file")
@@ -270,7 +276,9 @@ Subcommands:
 
 Global flags:
   --debug                Print the full error traceback on failure.
-  --config=path          Config file (default: ./var/config.yaml).
+  --config=path          Optional config file (default: none). When set, every
+                       tool call is checked against the policy rules in the
+                       file. When unset, every tool call is allowed.
   --log=path             Log file (default: ./var/aios.log).
   --socket=path          Approval daemon socket (default: /tmp/aios-approval.sock).
   --pidfile=path         Daemon pid file (default: ./var/aios-daemon.pid).

@@ -1,5 +1,129 @@
 # Changelog
 
+## v0.21.0 — end-to-end wire audit + BusWorker + BuildDeps hardening
+
+A full integration sweep against the doc set. The biggest
+finding was that the `runtime` and `tools` modules were not
+stitched together in any production code path: the CLI
+shipped a `PassthroughWorker` that stubbed tool calls
+instead of dispatching them through the bus. This release
+adds a real `BusWorker` and a five-test end-to-end suite
+that exercises the full chain.
+
+It also fixes two silent error swallows in
+`cli.BuildDeps` that hid system failures (audit-log open,
+policy-file parse) from the operator. A policy file that
+fails to parse is now a configuration error, and the
+audit log is required for any command that writes
+audit rows (the `init` and `daemon` subcommands remain
+audit-free so they can run before the database exists).
+
+### `internal/cli/bus_worker.go` (new)
+
+A 70-line `BusWorker` that implements `runtime.Worker`
+and forwards each task to a `tools.Bus`. The worker:
+
+- splits `task.Inputs` of the form `key=value` into a
+  `map[string]any`;
+- converts comma-separated values into `[]string` so
+  `run_shell` receives the argv the doc set requires
+  (JSON values, which also contain commas, are kept as
+  strings so `ask_user` can `json.Unmarshal`);
+- converts the bus's "requires approval" error into
+  `*runtime.WaitingForApproval` so the orchestrator's
+  `errors.As` branch fires;
+- carries the workspace root through `tools.Context`
+  so path validation in `read_file` /
+  `write_file` works against the project's real root.
+
+The worker is the only place in aios that meets the
+runtime orchestrator and the tools bus; without it the
+two are unconnected libraries.
+
+### `internal/cli/bus_worker_test.go` (new)
+
+Five tests, all PASS, that exercise the production wire:
+
+1. `TestBusWorker_EndToEnd` — read a real file from a
+   temp dir, audit row written, hash chain verifies.
+2. `TestBusWorker_PolicyDeny` — policy `deny`
+   short-circuits the bus with an error.
+3. `TestBusWorker_PolicyAsk` — policy `ask` surfaces
+   as `*runtime.WaitingForApproval`.
+4. `TestBusWorker_ShellViaSandbox` — `run_shell` runs
+   `cmd /c echo hello` through the subprocess sandbox;
+   the audit log captures the call.
+5. `TestBusWorker_AskTool` — `ask_user` is wired
+   through the bus adapter; the audit log captures
+   the dispatch.
+
+### `internal/cli/deps.go` (modified)
+
+- `BuildDeps` no longer swallows `audit.Open` errors.
+  An unwriteable audit log is a system error and the
+  binary exits 2.
+- `BuildDeps` no longer swallows `policy.Load` errors.
+  An unparseable policy file is a configuration error
+  and the binary exits 2.
+- `BuildDeps` now opens the audit log only for
+  commands that need it (`run`, `resume`, `cancel`,
+  `report`, `audit`); `init` and `daemon` are
+  audit-free so they can run before the database
+  exists. The new helper `isInitOrDaemonStart` is the
+  single source of truth.
+- On a policy-load failure the already-opened audit
+  log is closed before the error is returned so the
+  caller (and the test) does not leak a file handle.
+
+### `internal/cli/parser.go` (modified)
+
+The `--config` flag's default changed from
+`./var/config.yaml` (which never exists on a fresh
+install and forced a silent policy-load failure) to
+`""` (no policy). The doc set treats the policy as
+optional; the default now reflects that. The help
+text was updated to spell out the semantics.
+
+### `internal/cli/smoke_test.go` (modified)
+
+The four smoke tests that previously passed
+`--config=...config.yaml` no longer do. The smoke
+tests are about wiring, not policy; the policy is
+opt-in. `TestMain_EndToEndInit` now chdirs to a
+temp dir before running init, so the scaffolded
+files land in the temp dir and the test cleans
+up after itself.
+
+### `internal/cli/coverage_test.go` (modified)
+
+`TestCoverage_BuildDeps_PolicyError` was asserting
+the wrong contract (it expected `BuildDeps` to
+succeed when the policy file was unparseable). The
+test is now fixed to assert the correct contract:
+a parse error must be reported.
+
+A new test, `TestCoverage_BuildDeps_AuditError`,
+asserts that an unreachable audit path (e.g. a
+parent dir that does not exist) makes `BuildDeps`
+return an error mentioning "audit". This is the
+behaviour the binary relies on for exit code 2.
+
+### Counts
+
+- Unit + integration tests: 1090 PASS (was 1085;
+  +5 new BusWorker tests). 0 FAIL. 1 SKIP (the
+  symlink test, which is a Windows permission
+  limitation, not a code bug).
+- Integration tests with `-count=10`: 80/80 PASS,
+  no flakiness.
+- All 21 packages compile, pass `go vet`, and pass
+  `gofmt -l .`.
+- `internal/cli` is a library, not a binary, so
+  the production `package main` lives in a follow-up
+  commit; the existing `Main` function in
+  `internal/cli/main.go` is the entry point and
+  is fully tested by `TestMain_EndToEnd*`.
+
 ## v0.20.0 — aios-search + aios-memory finalization + e2e audit
 
 Add the aios-search module (glob, grep, code-search,

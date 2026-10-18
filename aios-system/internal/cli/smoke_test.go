@@ -45,9 +45,9 @@ func TestMain_EndToEndRun(t *testing.T) {
 	}
 	// Audit log path inside the temp dir.
 	auditPath := filepath.Join(dir, "aios.db")
+	// No --config: the smoke test does not exercise policy.
 	args := []string{
 		"aios",
-		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + auditPath,
 		"run", planPath,
 	}
@@ -81,17 +81,25 @@ func TestMain_EndToEndRun(t *testing.T) {
 // through Main.
 func TestMain_EndToEndInit(t *testing.T) {
 	dir := t.TempDir()
+	// init creates ./var/ relative to the CWD. cd into a
+	// temp dir so the scaffolded files don't pollute the
+	// package directory.
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldwd)
+
 	var stdout, stderr bytes.Buffer
 	code := Main([]string{
 		"aios",
-		"--config=" + filepath.Join(dir, "config.yaml"),
 		"init",
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code: %d, stderr:\n%s", code, stderr.String())
 	}
 	for _, name := range []string{"policy.yaml", "egress.yaml", "prices.yaml", "config.yaml"} {
-		path := filepath.Join(dir, name)
+		path := filepath.Join(dir, "var", name)
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("missing %s: %v", name, err)
 		}
@@ -131,7 +139,6 @@ func TestMain_EndToEndResume(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Main([]string{
 		"aios",
-		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + filepath.Join(dir, "aios.db"),
 		"resume", "--plan", planPath, "--task", "rsm-1",
 	}, &stdout, &stderr)
@@ -167,7 +174,6 @@ func TestMain_EndToEndReport(t *testing.T) {
 	// Run the plan first.
 	code := Main([]string{
 		"aios",
-		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + auditPath,
 		"run", planPath,
 	}, &bytes.Buffer{}, &bytes.Buffer{})
@@ -180,7 +186,6 @@ func TestMain_EndToEndReport(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := Main([]string{
 				"aios",
-				"--config=" + filepath.Join(dir, "config.yaml"),
 				"--log=" + auditPath,
 				"report", "--task", "rpt-1", "--format=" + format,
 			}, &stdout, &stderr)

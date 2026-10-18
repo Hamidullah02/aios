@@ -84,16 +84,34 @@ func BuildDeps(args *Args) (*Deps, error) {
 	if abs, err := filepath.Abs(auditPath); err == nil {
 		auditPath = abs
 	}
-	if log, err := audit.Open(audit.Config{Path: auditPath}); err == nil {
+	// Audit log: required for run / resume / report /
+	// audit / cancel. Optional for init and daemon start:
+	// those commands create or operate on the workspace
+	// before the audit log exists.
+	needAudit := !isInitOrDaemonStart(args)
+	if needAudit {
+		log, err := audit.Open(audit.Config{Path: auditPath})
+		if err != nil {
+			return nil, &CliError{Kind: "config", What: "open audit log " + auditPath, Cause: err}
+		}
 		deps.Audit = log
 	}
 	// Policy gateway: optional. Without it every tool
 	// call is allowed. The init subcommand does not
 	// require a policy; the other subcommands do.
+	// A policy file was passed but failed to load is a
+	// configuration error and must be reported. The
+	// already-opened audit log is closed before the
+	// function returns the error.
 	if args.ConfigPath != "" {
-		if rules, err := policy.Load(args.ConfigPath); err == nil {
-			deps.Policy = policy.New(rules, deps.Audit)
+		rules, err := policy.Load(args.ConfigPath)
+		if err != nil {
+			if deps.Audit != nil {
+				_ = deps.Audit.Close()
+			}
+			return nil, &CliError{Kind: "config", What: "load policy " + args.ConfigPath, Cause: err}
 		}
+		deps.Policy = policy.New(rules, deps.Audit)
 	}
 	// Resume handler: required for run / resume / cancel.
 	deps.Resume = runtime.NewResumeHandler("./var/checkpoints")
@@ -112,6 +130,22 @@ type DBPinger interface {
 }
 
 // fmtPath is a tiny helper used by the init printer.
+
+// isInitOrDaemonStart reports whether the command does
+// not need an audit log. Init creates the workspace;
+// `daemon start` boots the daemon (which opens its own
+// audit); `daemon stop` only removes a pidfile. None of
+// these touch the audit log.
+func isInitOrDaemonStart(args *Args) bool {
+	if args.Command == CmdInit {
+		return true
+	}
+	if args.Command == CmdDaemon {
+		return args.Subcommand == DaemonStart || args.Subcommand == DaemonStop
+	}
+	return false
+}
+
 func fmtPath(p string) string {
 	if p == "" {
 		return "(unset)"

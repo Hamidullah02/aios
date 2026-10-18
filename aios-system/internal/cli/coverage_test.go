@@ -570,10 +570,30 @@ func TestCoverage_BuildDeps_PolicyError(t *testing.T) {
 	}
 	args := &Args{ConfigPath: cfg, LogPath: filepath.Join(dir, "l.db")}
 	deps, err := BuildDeps(args)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		if deps != nil {
+			_ = deps.Close()
+		}
+		t.Fatal("expected error from invalid policy file")
 	}
-	defer deps.Close()
+	if !strings.Contains(err.Error(), "policy") {
+		t.Errorf("err should mention policy: %v", err)
+	}
+}
+
+func TestCoverage_BuildDeps_AuditError(t *testing.T) {
+	// An unreachable parent dir makes audit.Open fail.
+	// BuildDeps must surface that, not swallow it.
+	dir := t.TempDir()
+	bogus := filepath.Join(dir, "no", "such", "dir", "x.db")
+	args := &Args{LogPath: bogus}
+	_, err := BuildDeps(args)
+	if err == nil {
+		t.Fatal("expected error from unreachable audit path")
+	}
+	if !strings.Contains(err.Error(), "audit") {
+		t.Errorf("err should mention audit: %v", err)
+	}
 }
 
 // --- Audit coverage: union-of-kinds ---
