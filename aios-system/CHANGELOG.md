@@ -114,32 +114,4 @@ Substitutions vs the doc set:
 - **Two sub-packages (`status` + `log`)
   → single `internal/git/` Go package.**
   Same reasoning as `aios-roles`
-  (v0.25.0): the doc-set Python
-  sub-package split is not the right
-  shape for a Go monorepo.
-
-v0.28.1 — retry budget invariant
-
-Drop the negative-clamp in
-`RetryBudget.RemainingLocked`. The
-clamp was defensive: the function
-clamped the result to 0 if the
-calculated minimum was negative. The
-clamp is now redundant because the
-only caller (`Allow`) charges the
-budget only when the previous result
-was strictly positive; the invariant
-that the result is non-negative is
-enforced at the `Allow` boundary, not
-at `RemainingLocked`.
-
-A doc-comment was added to
-`RemainingLocked` to make the
-invariant explicit.
-
-No behaviour change in any test case
-(the invariant already held); the
-change is documentation + a removed
-redundant branch.
-
-## 
+  (
