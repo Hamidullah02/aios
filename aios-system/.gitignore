@@ -9,8 +9,6 @@ internal/**/var/
 
 # One-off audit scripts (created for a specific doc-audit pass;
 # safe to delete; not part of the build / test workflow).
-# These names are NOT yet in git, so ignoring them prevents
-# them from being added on a future commit.
 where.ps1
 untracked.ps1
 untracked-all.ps1
@@ -35,3 +33,11 @@ check-ignored.ps1
 check-ignore.ps1
 untrack.ps1
 ls-ps1.ps1
+
+# Test runner scripts we keep. Any other *.ps1 in the
+# project root is a one-off throwaway from a specific
+# audit or debug pass; ignore them so they don't get
+# added by a future commit.
+*.ps1
+!test-*.ps1
+!vet-fmt.ps1
