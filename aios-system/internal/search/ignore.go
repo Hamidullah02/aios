@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+// IgnorePatterns is the public alias for ignorePatterns.
+// Other modules (e.g. aios-watch) use the loader and matcher
+// without re-implementing the .aiosignore semantics.
+type IgnorePatterns = ignorePatterns
+
+// LoadIgnore reads .aiosignore from the workspace root. The
+// function is the public entry point other modules use.
+func LoadIgnore(workspace string) IgnorePatterns { return loadIgnore(workspace) }
+
 // ignorePatterns holds gitignore-style patterns loaded from
 // .aiosignore. Each pattern is matched against the slash-
 // separated relative path.
@@ -40,7 +49,11 @@ func loadIgnore(workspace string) ignorePatterns {
 // to the workspace) matches any ignore pattern. The match
 // uses filepath.Match; a pattern that matches any path
 // segment is treated as a hit.
-func (p ignorePatterns) match(rel string) bool {
+func (p ignorePatterns) match(rel string) bool { return p.Match(rel) }
+
+// Match is the public name for the matcher. Other modules
+// (e.g. aios-watch) call this.
+func (p ignorePatterns) Match(rel string) bool {
 	if len(p.patterns) == 0 {
 		return false
 	}
