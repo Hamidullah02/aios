@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Run Report — {{.TaskID}}</title>
+  <meta name="generator" content="aios-report">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 2em auto; max-width: 60em; color: #222; }
+    h1 { border-bottom: 1px solid #ccc; padding-bottom: 0.3em; }
+    h2 { margin-top: 2em; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }
+    .summary { display: grid; grid-template-columns: max-content 1fr; gap: 0.3em 1em; }
+    .summary dt { font-weight: bold; }
+    .summary dd { margin: 0; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+    th, td { border: 1px solid #ddd; padding: 0.4em 0.6em; text-align: left; }
+    th { background: #f5f5f5; }
+    tr:nth-child(even) { background: #fafafa; }
+    ul.approvals { list-style: square; }
+    .empty { color: #888; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>Run Report — {{.TaskID}}</h1>
+
+  <h2>Summary</h2>
+  <dl class="summary">
+    <dt>Status</dt><dd>{{.Status}}</dd>
+    <dt>Duration</dt><dd>{{printf "%.1fs" .DurationSeconds}}</dd>
+    <dt>Cost</dt><dd>{{printf "$%.3f" .CostUSD}}</dd>
+    <dt>Tokens</dt><dd>{{.InputTokens}} in / {{.OutputTokens}} out</dd>
+  </dl>
+
+  <h2>Plan</h2>
+  <dl class="summary">
+    <dt>Plan id</dt><dd>{{.PlanID}}</dd>
+    <dt>Started</dt><dd>{{.StartedAt}}</dd>
+    <dt>Ended</dt><dd>{{.EndedAt}}</dd>
+  </dl>
+
+  <h2>Steps</h2>
+  {{if .Steps}}
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Tool</th>
+        <th>Status</th>
+        <th>Started</th>
+        <th>Ended</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $i, $s := .Steps}}
+      <tr>
+        <td>{{add1 $i}}</td>
+        <td>{{$s.Tool}}</td>
+        <td>{{$s.Status}}</td>
+        <td>{{$s.StartedAt}}</td>
+        <td>{{$s.EndedAt}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="empty">No steps.</p>
+  {{end}}
+
+  {{if .Approvals}}
+  <h2>Approvals</h2>
+  <ul class="approvals">
+    {{range .Approvals}}
+    <li>{{.}}</li>
+    {{end}}
+  </ul>
+  {{end}}
+</body>
+</html>

@@ -24,7 +24,7 @@ module. The module is a Go package and a CLI.
 | Term | Definition |
 | --- | --- |
 | Wedge | A set of tasks that exercise a specific capability. |
-| Tier | A level of model capability. |
+| Class | A level of model capability: cheap, mid, strong. |
 
 ## 5. Architecture
 
@@ -32,13 +32,13 @@ The aios-benchmark module has four components.
 
 - `internal/benchmark/dataset` — the wedge dataset.
 - `internal/benchmark/runner` — the benchmark runner.
-- `aios.benchmark.two_tier` — the two-tier runner.
+- `aios.benchmark.two_class` — the two-class runner.
 - `aios.benchmark.loop` — the loop checker.
 
 The four components depend on aios-core and
 aios-runtime. The components depend on each other in
 this order. The dataset has no dependencies. The
-runner depends on the dataset. The two-tier runner
+runner depends on the dataset. The two-class runner
 depends on the dataset and the runner. The loop
 checker depends on the dataset and the runner.
 
@@ -56,9 +56,9 @@ The runner component runs the orchestrator on every
 task. The component records the metrics. The
 component returns the list of metrics.
 
-### 6.3 Two-Tier Runner
+### 6.3 Two-Class Runner
 
-The two-tier runner component runs the dataset with
+The two-class runner component runs the dataset with
 two orchestrators. The component computes the
 delta. The component returns the delta.
 
@@ -118,11 +118,11 @@ type BenchmarkRunner:
         """
 ```
 
-### 8.2 TwoTierRunner
+### 8.2 TwoClassRunner
 
 ```go
-type TwoTierRunner:
-    """The two-tier runner."""
+type TwoClassRunner:
+    """The two-class runner."""
 
     def __init__(
         self,
@@ -130,13 +130,13 @@ type TwoTierRunner:
         weak_orchestrator: Orchestrator,
         dataset: WedgeDataset,
     ) -> nil:
-        """Create the two-tier runner."""
+        """Create the two-class runner."""
 
-    func run(self) -> TwoTierMetrics:
-        """Run the two-tier benchmark.
+    func run(self) -> TwoClassMetrics:
+        """Run the two-class benchmark.
 
         Returns:
-            The two-tier metrics.
+            The two-class metrics.
         """
 ```
 
@@ -153,9 +153,9 @@ The run algorithm works as follows.
 3. When the task fails, record the failure.
 4. Return the list of metrics.
 
-### 9.2 Two-Tier Algorithm
+### 9.2 Two-Class Algorithm
 
-The two-tier algorithm works as follows.
+The two-class algorithm works as follows.
 
 1. Run the dataset with the strong orchestrator.
 2. Run the dataset with the weak orchestrator.

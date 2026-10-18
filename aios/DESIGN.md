@@ -35,8 +35,15 @@
 **Assumptions** (change these and the plan changes):
 
 - A1: the first builder is one person.
-- A2: Python backend.
-- A3: Linux host with Docker available.
+- A2: **Go 1.23 backend** (revised from Python in
+  v0.9; the PRD is the source of truth, this
+  blueprint's earlier Python framing is
+  historical).
+- A3: Linux host with **gVisor or a microVM
+  for production isolation; Docker is
+  acceptable for local development only**
+  (revised from "Docker available" in v0.9
+  per §14 of the PRD).
 - A4: the first workflow is software delivery in a sandboxed repository.
 - A5: prototype budget under about $50/month.
 
@@ -148,7 +155,7 @@ The system never: sends external messages, publishes, spends money, deletes impo
 - 100% of adversarial tests that request protected actions are blocked by the gateway, not by the model.
 - Crash at any step resumes with no duplicate side effects in the fault-injection suite.
 - Final reports contain no unverified success claims on the benchmark (false-success rate target 0 in the suite; measured, not assumed).
-- Median cost and time per verified task recorded for at least two model tiers.
+- Median cost and time per verified task recorded for at least two model classes.
 
 ### 3.5 Vision vs minimum useful product
 
@@ -254,13 +261,13 @@ flowchart TD
 
 | Area | Recommendation | Alternatives | Cost / ops burden | Why not the alternatives |
 | --- | --- | --- | --- | --- |
-| Backend | Python 3.12 + FastAPI | TypeScript/Node; Go | Free; low | Python has the best agent/eval tooling; Go is a later option for the gateway |
+| Backend | **Go 1.23** (revised from Python 3.12 + FastAPI; see A2) | TypeScript/Node; Go | Free; low | Go is the source of truth in the PRD; Python was the v0.6 - v0.8 framing |
 | Frontend | CLI first, then one small server-rendered page for approvals | React SPA | Free; low | A SPA adds build and security surface before it is needed |
 | Database | SQLite for the first milestone, Postgres from Phase 2 | Postgres day one; Mongo | Free / managed Postgres cost U | Postgres is needed for DBOS and multi-user; SQLite keeps the prototype to one file |
 | Workflow state | Hand-written state machine in M1; adopt DBOS when resumability across crashes is required | Temporal; LangGraph checkpointer | Free (library) | Temporal needs its own server; LangGraph's graph abstraction is more than the first loop needs |
-| Agent framework | None for M1 (thin loop + Pydantic models); LangGraph only if graphs get complex | CrewAI, AutoGen | Free | Extra abstraction and role hierarchies the brief warns against |
+| Agent framework | None for M1 (thin loop + Go structs with explicit JSON tags); LangGraph only if graphs get complex | CrewAI, AutoGen | Free | Extra abstraction and role hierarchies the brief warns against |
 | Sandboxing | Docker with gVisor runtime locally; E2B microVMs as hosted option; Firecracker later | Plain containers; Daytona | Local free; E2B list ~ $0.0504/vCPU-h + $0.0162/GiB-h (I, checked Oct 12) | Plain containers are not enough for untrusted agent code (I); Daytona core went closed-source |
-| Model providers | One adapter interface; start with a cheap tier and a strong tier from different vendors | Single vendor | List prices in §9 | Avoids lock-in and lets us test weaker models |
+| Model providers | One adapter interface; start with a cheap class and a strong class from different vendors | Single vendor | List prices in §9 | Avoids lock-in and lets us test weaker models |
 | Retrieval | SQLite FTS / Postgres full-text first; embeddings only if measured to help | Vector DB from day one | Free | A vector store adds infrastructure without evidence of need |
 | Integrations | MCP behind an allowlist; direct typed API wrappers for anything with side effects | Browser automation | Free | Browser automation is the most injection-exposed path; use only when no API exists |
 | Deployment | Single machine + Docker Compose; scale only at §9 thresholds | Kubernetes | Free-$$ | Orchestration infrastructure without a demonstrated need |
@@ -272,14 +279,14 @@ flowchart TD
 | Role / function | LLM? | Notes |
 | --- | --- | --- |
 | Task compiler (draft spec) | Yes | Output must validate against the schema; validator is code and rejects specs without acceptance checks |
-| Planner | Yes, strong tier only when the plan is complex or ambiguous | Easy tasks use a template plan |
-| Worker (implementer) | Yes, cheap tier by default | Sees only the minimal context for the current step |
+| Planner | Yes, strong class only when the plan is complex or ambiguous | Easy tasks use a template plan |
+| Worker (implementer) | Yes, cheap class by default | Sees only the minimal context for the current step |
 | Verifier | **Code first** (tests, linters, schema, diff-scope check), model review second | A second model repeating the same claim is not evidence |
 | Policy evaluation | **No** | Deterministic rules; fails closed |
 | Budget, retry, timeout, state transitions | **No** | Orchestrator code |
 | Researcher (Phase 4) | Yes | Must emit claims with source URL, retrieval date and confidence |
 | Business-ops specialist (Phase 4) | Yes | Drafts only; sends are protected actions |
-| Summarizer / context compactor | Yes, cheap tier | Output stored as derived data, never as a verified fact |
+| Summarizer / context compactor | Yes, cheap class | Output stored as derived data, never as a verified fact |
 
 No separate agent exists for tasks that are a function call. Start with **planner/compiler, worker, verifier**; add roles only when a benchmark shows a gap.
 
@@ -374,11 +381,11 @@ Agents never write to policy, skills or audit stores directly. A stored claim is
 
 | Condition | Route |
 | --- | --- |
-| Routine step with executable check, low risk | Cheap tier |
-| Planning or ambiguous spec | Strong tier once, then cheap tier executes |
-| Verifier failed twice | Strong tier for diagnosis |
-| High-risk review (security change, financial figure, external message draft) | Strong tier + deterministic checks + human approval |
-| Budget at 80% | Switch to cheaper tier or stop and report |
+| Routine step with executable check, low risk | Cheap class |
+| Planning or ambiguous spec | Strong class once, then cheap class executes |
+| Verifier failed twice | Strong class for diagnosis |
+| High-risk review (security change, financial figure, external message draft) | Strong class + deterministic checks + human approval |
+| Budget at 80% | Switch to cheaper class or stop and report |
 
 Keep every prompt under the cheap model's lower-price context band (for Haiku 5.5 that is 100K tokens, above which listed prices rise 5x per one tracker) by compaction and retrieval.
 
@@ -392,26 +399,26 @@ For tasks whose success is machine-checkable (the wedge in §17: bug-fix-against
 
 **Algorithm (per task, within `budgets.max_attempts`)**
 
-1. **Propose.** Worker produces an artifact (diff, report, message) using the cheap tier.
-2. **Re-check.** A second, *independent* pass: a different model tier than the proposer, **or** the same model with a fresh prompt that does not see the first attempt ("read the test, then independently write the fix from scratch"). The second pass is scored on the acceptance check (tests, schema, property test, diff-scope).
+1. **Propose.** Worker produces an artifact (diff, report, message) using the cheap class.
+2. **Re-check.** A second, *independent* pass: a different model class than the proposer, **or** the same model with a fresh prompt that does not see the first attempt ("read the test, then independently write the fix from scratch"). The second pass is scored on the acceptance check (tests, schema, property test, diff-scope).
 3. **Agree or escalate.** The orchestrator compares the two outputs:
     - If both pass and the *behavior* (not the literal text) matches within a tolerance, mark the attempt `verified`.
-    - If they disagree, the third move is: run a third attempt, or escalate to the strong tier for diagnosis, depending on the budget left.
+    - If they disagree, the third move is: run a third attempt, or escalate to the strong class for diagnosis, depending on the budget left.
 4. **Keep the best.** After every attempt, grade the artifact against the acceptance check and store the highest-scoring passing result. If no attempt passes, report the top-scoring failure with all attempts, not just the last.
 5. **Stop conditions.** Stop when (a) an attempt is verified, (b) `budgets.max_attempts` is reached, (c) the no-progress detector from §6.4 fires, or (d) the cost guard trips (next bullet).
 6. **Cost guard.** Once 80% of `budgets.max_cost_usd` is spent, drop from “two models” to “one model + code re-run”; once 95% is spent, stop and report. Loop is a budgeted feature, not an unbounded one.
 
-#### 6.8.1 Defaults: prompt template, model-tier choice, behavior-match tolerance (H3 fix)
+#### 6.8.1 Defaults: prompt template, model-class choice, behavior-match tolerance (H3 fix)
 
-**Hole (H3):** v0.7 said the re-check is a “fresh prompt that does not see the first attempt” but did not pin what that prompt looks like, which model tier does the re-derivation by default, or how “behavior matches” is measured. Without those defaults, two builders of §6.8 can disagree on whether the loop fired correctly and on whether two attempts “agreed.”
+**Hole (H3):** v0.7 said the re-check is a “fresh prompt that does not see the first attempt” but did not pin what that prompt looks like, which model class does the re-derivation by default, or how “behavior matches” is measured. Without those defaults, two builders of §6.8 can disagree on whether the loop fired correctly and on whether two attempts “agreed.”
 
 **Fix (added in v0.8):** three concrete defaults. A workflow can override any of them.
 
 - **Re-derivation prompt template.** The re-derivation prompt is a separate prompt assembly: it gets the user’s objective, the acceptance check (tests, schema, expected output), the workspace state at the start of the attempt, and an explicit instruction *“do not look at any prior attempt. Independently produce an artifact that passes the acceptance check.”* It does not get the proposer’s artifact, the proposer’s diff, or the proposer’s error messages. The template lives in gent/prompts/rederive.md and is part of B1’s deliverable; the B1 unit test set must include one test that runs the template against a recorded proposer artifact and asserts the re-derivation prompt does *not* contain any of the proposer’s words.
-- **Default model-tier choice.** Default: *different* model tier from the proposer. If the proposer was cheap, the re-deriver is mid; if mid, the re-deriver is strong; if strong (already expensive), the re-deriver is mid and the third attempt is skipped. A workflow can pin the re-deriver to “same tier” via TaskPlan.budgets.rederive_tier = “same”, but the default is “different” because same-tier re-derivations on the same prompt seed tend to repeat the same mistake. The §6.8 cost guard caps the spend before this can run away.
+- **Default model-class choice.** Default: *different* model class from the proposer. If the proposer was cheap, the re-deriver is mid; if mid, the re-deriver is strong; if strong (already expensive), the re-deriver is mid and the third attempt is skipped. A workflow can pin the re-deriver to “same class” via TaskPlan.budgets.rederive_class = “same”, but the default is “different” because same-class re-derivations on the same prompt seed tend to repeat the same mistake. The §6.8 cost guard caps the spend before this can run away.
 - **Behavior-match tolerance.** Two attempts “agree” if **both pass the acceptance check** *and* their produced artifacts produce the same git diff --stat output within a tolerance of ±2 files added, ±20 lines added/removed, and the same set of test files modified. The tolerance is a number, not a vibe, because a vibe becomes “I’ll know it when I see it” and the verifier and the loop disagree. B1 ships a helper ehavior_match(a, b, tolerance) and a test set with three known-match and three known-mismatch pairs.
 
-**Limits.** The defaults are conservative: same-tiers rarely help, and a too-loose tolerance produces false agreement. If a workflow genuinely needs same-tier re-derivation or a wider tolerance, it says so on the TaskPlan and the §15.5 benchmark records the deviation.
+**Limits.** The defaults are conservative: same-classes rarely help, and a too-loose tolerance produces false agreement. If a workflow genuinely needs same-class re-derivation or a wider tolerance, it says so on the TaskPlan and the §15.5 benchmark records the deviation.
 
 **Why now (not later).** v0.7 made the loop feel like a one-liner; it is not. The defaults are the difference between a verifier and a coin flip on the bug-fix wedge.
 
@@ -536,7 +543,10 @@ Policy gateway outside the agent runtime, per-task sandbox with egress proxy, cr
 
 **Hole (H8):** The §16.9 learned-controller plan and the §15.5 head-to-head benchmark both consume *decision traces* — structured records of what the orchestrator did, why, and what happened. v0.7 named the fields informally ("state features, action taken, action probabilities where randomized, outcome, model, retries, cost, human intervention") but did not pin a typed schema, so a writer and a reader could disagree silently about what `action_taken` means.
 
-**Fix (added in v0.8):** a single Pydantic `DecisionTrace` model, owned by B1 as part of the schema set, versioned with the audit log:
+**Fix (added in v0.8;** revised to Go in v0.9, where
+"typed" means a Go struct with explicit JSON
+tags, not a Pydantic model**):** a single
+`DecisionTrace` model, owned by B1 as part of the schema set, versioned with the audit log:
 
 ```
 class DecisionTrace(BaseModel):
@@ -548,7 +558,7 @@ class DecisionTrace(BaseModel):
     candidate_actions: list[str]  # all actions the policy considered (for counterfactual analysis)
     action_taken: str
     action_probabilities: dict[str, float] | None  # only when the policy was randomized
-    model_tier: str  # 'cheap' | 'mid' | 'strong' | 'none' (for non-LLM steps)
+    model_class: str  # 'cheap' | 'mid' | 'strong' | 'none' (for non-LLM steps)
     tool_calls_attempted: int
     retries_in_step: int  # the §6.4 per-step retry count, not the §6.8 attempt count
     outcome: str  # 'succeeded' | 'failed' | 'blocked' | 'needs_approval' | 'no_progress'
@@ -594,7 +604,7 @@ Task completion rate; correctness/completeness score; independent-verification p
 
 ### 9.4 Experiments that close the unknowns
 
-- **E1** Run the coding and document sets on a cheap tier, a mid tier and a strong tier, with and without (a) task decomposition, (b) test-based verification, (c) retrieval. Report completion rate and cost per verified task for each cell. This is the test of whether orchestration helps weak models.
+- **E1** Run the coding and document sets on a cheap class, a mid class and a strong class, with and without (a) task decomposition, (b) test-based verification, (c) retrieval. Report completion rate and cost per verified task for each cell. This is the test of whether orchestration helps weak models.
 - **E2** Run the adversarial suite against the sandbox and gateway with deliberately misconfigured agents; confirm enforcement is real, not prompt-based. Repeat against Grok Build's and Claude Code's sandbox settings if they are used as workers.
 - **E3** Count approval prompts per verified task and the rate of approvals granted without edits; tune batching.
 - **E4** Compare SQLite-backed hand-written state against DBOS on Postgres under fault injection for resume correctness and overhead.
@@ -605,11 +615,11 @@ Task completion rate; correctness/completeness score; independent-verification p
 | --- | --- | --- |
 | Claude Haiku 5.5 | $0.10 in / $0.50 out per M tokens (prompts up to 100K; $0.50 / $2.50 above); cache read $0.01 | [tracker, Oct 8](https://www.developersdigest.tech/blog/frontier-model-api-pricing-june-2026) |
 | Claude Sonnet 5.5 | $2 in / $10 out; cache read $0.10 after an October cut | same tracker |
-| Grok 4.7 | $2 in / $6 out; cached $0.50; long-context ($4/$12) above 200K per one tracker, 500K context | [tracker, Oct 10](https://intuitionlabs.ai/articles/ai-api-pricing-comparison-grok-gemini-openai-claude) |
+| Grok 4.7 | $2 in / $6 out; cached $0.50; long-context ($4/$12) above 200K per one tracker, 500K context | [tracker, Oct 10](https://intuitionlabs.ai/articles/ai-api-pricing-comparison-grok-gemini-openai-claude) | **The exact Grok model name (4.6 vs 4.7) is reported differently across sources; treat the version as "current Grok flagship at the cited prices" and re-verify before any public claim.** |
 | Gemini 3.8 Flash | $0.75 / $3.75 through Dec 31, 2026 | same tracker |
 | DeepSeek V4.1 Flash | $0.15 / $0.60 on one tracker; $0.30 / $1.20 on another | [one](https://www.aipricing.guru/), [other](https://benchlm.ai/llm-pricing-trends) (conflict; unresolved) |
 | Sandbox compute (E2B/Daytona-class) | $0.0504 per vCPU-hour + $0.0162 per GiB-hour | [comparison checked Oct 12](https://www.agent37.com/blog/daytona-alternative) |
-| Grok Build subscription / Grok Bot | $30/month SuperGrok; Grok Bot reported from $120/seat/month | [Wikipedia](https://en.wikipedia.org/wiki/Grok_Build), [third-party](https://beam.ai/agentic-insights/grok-bot-enterprise-ai-agents) |
+| Grok Build subscription / Grok Bot | $30/month SuperGrok; Grok Bot reported from $120/seat/month | [Wikipedia](https://en.wikipedia.org/wiki/Grok_Build), [third-party](https://beam.ai/agentic-insights/grok-bot-enterprise-ai-agents) | **Grok Bot pricing conflicts across sources** (bundled with SuperGrok Heavy / Cursor Ultra / Teams Premium vs. included with SuperGrok at $30/month). **Grok Bot also uses Cursor authentication and account data settings** (xAI integration). Treat Grok Bot pricing as unverified; the PRD's head-to-head does not use Grok Bot because it has no headless coding mode. |
 | Self-hosted gVisor, Firecracker, DBOS Transact, SQLite | Open source / free (compute you already own) | [DBOS](https://dbos.dev/dbos-transact), [sandbox roundup](https://www.fast.io/resources/best-ai-agent-sandboxes.md) |
 | Hosting, managed Postgres, observability | **Not retrieved (U)** | placeholders below are my assumptions |
 
@@ -617,9 +627,9 @@ Differing trackers mean any figure here can move; the router abstraction exists 
 
 ### 9.6 Cost scenarios (model estimates, not measurements)
 
-**Unit assumptions (invented, to be replaced by E1 data):** a medium task uses about 300K input tokens (80% served from cache) and 40K output tokens on the worker; a hard-task verifier call uses 50K uncached input and 5K output; mix is 70% routine (cheap tier) and 30% hard (mid tier); retries add 30%; every prompt stays under 100K tokens. Sandbox: 2 vCPU, 4 GiB, 10 minutes per task (~ $0.028).
+**Unit assumptions (invented, to be replaced by E1 data; treat as a placeholder, not a measurement):** a medium task uses about 300K input tokens (80% served from cache) and 40K output tokens on the worker; a hard-task verifier call uses 50K uncached input and 5K output; mix is 70% routine (cheap class) and 30% hard (mid class); retries add 30%; every prompt stays under 100K tokens. **Caveat from one external measurement:** at Max effort, a verbose model (Haiku 5.5 in the cited benchmark) was observed at approximately 162K output tokens per task, roughly 4× the 40K assumption above. The tokenizer on that model also produced approximately 30% more tokens than Haiku 4.5 for the same text. The 40K figure is therefore a low estimate; the cost scenarios in this table are optimistic until E1 measures the actual output volume on our own tasks. The PRD's cost target defaults ($0.50 / 600 s) are initial placeholders for the same reason (§12.1). Sandbox: 2 vCPU, 4 GiB, 10 minutes per task (~ $0.028).
 
-Per-task model cost with these assumptions: cheap tier ~ $0.028; mid tier worker ~ $0.54; mid tier verifier ~ $0.15 (hard tasks only; routine tasks verified by tests).
+Per-task model cost with these assumptions: cheap class ~ $0.028; mid class worker ~ $0.54; mid class verifier ~ $0.15 (hard tasks only; routine tasks verified by tests).
 
 |  | 1. Individual prototype | 2. Small business | 3. Multi-user, concurrent |
 | --- | --- | --- | --- |
@@ -668,7 +678,7 @@ Effort assumes one experienced developer; calendar time depends on availability.
 | Phase | Objective and deliverables | Key tasks (dependency order) | Acceptance and security gates | Effort | Deferred |
 | --- | --- | --- | --- | --- | --- |
 | **0 Foundations** | Spec schema, benchmark harness, fake-model test double | Define task schema; write 20 coding benchmark tasks with checkers; build harness that runs a task against a stub model | Harness reproducible; checkers fail on wrong output | **~10—13 days** | Real models |
-| **1 MVP: verified software delivery** | Single-machine runner that completes sandboxed coding tasks with evidence | State machine + audit log; sandbox runner; policy gateway; budget meter; worker + verifier loop; CLI; approval via CLI | Adversarial suite classes 2, 3, 4, 6, 7 pass; crash-resume passes; cost per verified task recorded for 2 tiers (E1 first cut) | **~28—42 days (4—6 weeks)** | Web UI, parallelism, connectors, tool building |
+| **1 MVP: verified software delivery** | Single-machine runner that completes sandboxed coding tasks with evidence | State machine + audit log; sandbox runner; policy gateway; budget meter; worker + verifier loop; CLI; approval via CLI | Adversarial suite classes 2, 3, 4, 6, 7 pass; crash-resume passes; cost per verified task recorded for 2 classes (E1 first cut) | **~28—42 days (4—6 weeks)** | Web UI, parallelism, connectors, tool building |
 | **2 Skills, hooks, memory, scheduling** | Skills loader, hook system, policy CLI, memory writes restricted to verifier, scheduler | Skills folder loader; `PreToolUse`/`PostToolUse` hooks; `policy validate`; verifier-only memory; in-process scheduler (no Temporal server); a **durable scheduler is added in Phase 2** for ScheduleSpec cron triggers (see H7 below) | Skill/hook adversarial cases pass; memory poisoning test passes | **~21—28 days (3—4 weeks)** | Business workflows |
 | **3 Durability and approvals** | Postgres + DBOS, small approval web page, egress proxy hardening, ACP worker adapter | Migrate state; idempotency keys everywhere; approval service with expiry; credential broker; ACP wrapper for an external agent as an untrusted worker | E2 and E4 complete; all 14 risk-register tests exist; fail-closed verified by killing components | **~21—28 days** | Business connectors |
 | **4 Business workflows A, B, C and read-only connectors** | Workflows A, B, C with read-only connectors; research, prospect drafts, software delivery already in earlier phases | Citation/provenance store; research verifier; MCP allowlist; mock services; scheduled runs | Injection corpus blocked; claims-to-sources check passes; zero real sends | **~28—42 days (4—6 weeks)** | Outbound sending, spending |
@@ -688,7 +698,7 @@ The **canonical backlog is the unified B-list in §17.5** (B1 through the end of
 
 ### Decisions needed from you later
 
-1. Which model tiers to benchmark first (cheap tier and mid tier suggested; the vendors are your call).
+1. Which model classes to benchmark first (cheap class and mid class suggested; the vendors are your call).
 2. Local-only prototype or a hosted sandbox from the start.
 3. Whether to prototype with an existing agent as a worker (via ACP/headless) or write the thin worker loop first.
 4. Which real business tools you will eventually allow, so connector work can be prioritized.
@@ -721,11 +731,11 @@ A second, independently produced blueprint was compared against this one on Octo
 | Topic | Second blueprint | Merged decision | Reason |
 | --- | --- | --- | --- |
 | Durable execution | Temporal in Phase 1 | Hand-written checkpointed state machine first, then DBOS (Postgres-backed library) or Temporal, decided by experiment E4 | Temporal needs its own server, which sits awkwardly with its own "local-first, laptop" requirement; E4 measures the difference |
-| Verifier model | Verifier is "often a cheaper model" | Verifier is code-first (tests, schema, diff scope); a model review is a supplement, and for high-risk steps the stronger tier | An LLM verifier weaker than the worker is not independent evidence |
+| Verifier model | Verifier is "often a cheaper model" | Verifier is code-first (tests, schema, diff scope); a model review is a supplement, and for high-risk steps the stronger class | An LLM verifier weaker than the worker is not independent evidence |
 | Audit log | Append-only SQLite | Append-only plus a hash chain and periodic export outside the control plane's write access | Append-only rows alone are not tamper-evident |
 | Sandbox | Rootless Docker with seccomp default for local use | Docker with a gVisor runtime locally; microVM when hosted or when running untrusted code | Plain containers are widely judged insufficient for untrusted agent code in the sandbox sources reviewed |
 | Grok Build / Grok Bot facts | Mostly tagged unclear; says Grok Bot docs path returns 404 | Use v0.1 §2: official docs exist and list hooks, skills, MCP, sandboxing, ACP and headless mode for Grok Build; Grok Bot's shared computer and account-level security boundary are documented | The shared-boundary finding is the most design-relevant fact about Grok Bot and is absent from the second blueprint |
-| Model and price references | Cites a Sonnet 4.6 system card and illustrative $0.20/$1.00, $2/$8, $3/$15 tiers | Use §9.5 list prices (Haiku 5.5 $0.10/$0.50, Sonnet 5.5 $2/$10, Grok 4.7 $2/$6); keep scenarios as unmeasured estimates | Their model references are a generation behind and their scenarios use higher unit costs; neither set of scenarios is measured |
+| Model and price references | Cites a Sonnet 4.6 system card and illustrative $0.20/$1.00, $2/$8, $3/$15 classes | Use §9.5 list prices (Haiku 5.5 $0.10/$0.50, Sonnet 5.5 $2/$10, Grok 4.7 $2/$6); keep scenarios as unmeasured estimates | Their model references are a generation behind and their scenarios use higher unit costs; neither set of scenarios is measured |
 | Approvals UI | React/Vite SPA in Phase 3 | CLI approvals first, then one small server-rendered page | Less build and security surface |
 | Phase 0 estimate | About 8 days | Treat as **13 days**; the second blueprint's own M0.1-M0.10 items add up to 13 | Internal inconsistency; for a solo builder add margin |
 | Claim labelling | Many items tagged V without noting retrieval limits | Keep V/I/C/U tagging and say when a source was not opened | Unverified V tags are the main reliability risk in either document |
@@ -745,7 +755,7 @@ One item checked: the second blueprint's Claude Code plan prices (Pro about $17 
 
 Estimates assume one experienced developer. The second blueprint's 74 engineer-days for 2-3 engineers is roughly consistent once team size and review overhead are accounted for.
 
-**Unified first backlog (replaces §12 ordering where they differ):** B1 repo + typed schemas (TaskPlan, Tool, Result envelope) with validator → B2 hash-chained audit log → B3 task store (one SQLite file per project) + state machine → B4 benchmark harness + 20 coding tasks → B5 policy engine (deny > ask > allow, 30+ rule cases including shell-evasion forms) → B6 sandbox runner (gVisor, read-only policy mounts, no network) proven by escape tests → B7 egress proxy → B8 model adapter + router + budget meter → B9 tool bus with `read_file`, `search_code`, `edit_file`, `run_command` → B10 planner + code-first verifier loop → B11 approval service with content-hash binding and expiry → B-ask CLI prompt for the wedge (a typed sk_user tool: surfaces a question with discrete options, blocks the task until the user answers, records the answer in the audit log; web UI in Phase 2); → B12 B12 crash-resume with idempotency keys (and **queue rebuild on restart**: after a crash, the orchestrator rebuilds its in-memory queue from the audit log + task store before taking new work; verified by the B14 fault-injection suite) → B13 report generator → B14 adversarial suite in CI (original 9 classes plus shell-evasion, approval replay, policy-file write and memory-poisoning cases) → B15 first benchmark run on two model tiers → B16 go/no-go for Phase 2. **First task remains B1.**
+**Unified first backlog (replaces §12 ordering where they differ):** B1 repo + typed schemas (TaskPlan, Tool, Result envelope) with validator → B2 hash-chained audit log → B3 task store (one SQLite file per project) + state machine → B4 benchmark harness + 20 coding tasks → B5 policy engine (deny > ask > allow, 30+ rule cases including shell-evasion forms) → B6 sandbox runner (gVisor, read-only policy mounts, no network) proven by escape tests → B7 egress proxy → B8 model adapter + router + budget meter → B9 tool bus with `read_file`, `search_code`, `edit_file`, `run_command` → B10 planner + code-first verifier loop → B11 approval service with content-hash binding and expiry → B-ask CLI prompt for the wedge (a typed sk_user tool: surfaces a question with discrete options, blocks the task until the user answers, records the answer in the audit log; web UI in Phase 2); → B12 B12 crash-resume with idempotency keys (and **queue rebuild on restart**: after a crash, the orchestrator rebuilds its in-memory queue from the audit log + task store before taking new work; verified by the B14 fault-injection suite) → B13 report generator → B14 adversarial suite in CI (original 9 classes plus shell-evasion, approval replay, policy-file write and memory-poisoning cases) → B15 first benchmark run on two model classes → B16 go/no-go for Phase 2. **First task remains B1.**
 
 **H7 (durable scheduler):** v0.7 says “in-process scheduler (no Temporal server)” for Phase 2, but §16.10"s ScheduleSpec cron triggers need a scheduler that survives an orchestrator restart. An in-process queue dies with the process. **Fix (v0.8):** Phase 2 ships two scheduler components, not one. The in-process queue handles retries of *currently running* tasks (durable across the worker’s heartbeat, not across a process crash). The durable scheduler handles *future scheduled runs* and is backed by DBOS once Phase 3 lands. Phase 2 is honest: an in-process queue is fine for retries during a single process lifetime, but cron is a different problem. Until Phase 3, schedules fire on best-effort: if the process is down at the trigger time, the run is dropped and the user is alerted. Phase 3 promotes the scheduler to DBOS and the same code path becomes crash-safe.
 
@@ -764,7 +774,7 @@ A separate review of the same blueprint concluded that several of the document's
 
 | Claim | Defensible now? | How to defend or retract |
 | --- | --- | --- |
-| Lower cost per *successful* task on small and medium coding work | Conditional | Run the same 20 coding tasks against Claude Code Pro and Grok Build on the same model tier; report cost + pass rate, not cost alone. Defer the claim until §15.5 completes. |
+| Lower cost per *successful* task on small and medium coding work | Conditional | Run the same 20 coding tasks against Claude Code Pro and Grok Build on the same model class; report cost + pass rate, not cost alone. Defer the claim until §15.5 completes. |
 | Safer by construction (deny-by-default policy, independent verifier, append-only audit) | Yes, against our own suite only | Run the §8.7 adversarial suite in CI; show pass/fail per class. Do not claim competitors fail it without measuring them. |
 | Fewer silent failures (lower false-success rate) | Conditional | Measure "false success" — tasks marked `succeeded` that the verifier would re-judge as `incomplete` or `failed`. Publish the number. |
 | Better at long, crash-prone tasks | Conditional, only after Phase 1 | Kill the worker mid-task; show we resume and finish. |
@@ -821,8 +831,8 @@ So the honest token story is: **fewer tokens per task than a frontier-model-on-e
 
 The only "better than" claim worth making is a measured one. Plan:
 
-- **Scope.** The 20 coding tasks in §9.1 (all fix-this-failing-test per the §17 wedge), plus the 10 research tasks, plus the 20+ adversarial cases from §8.7. Three subjects: this system with §6.8 looped verification, Claude Code (Pro, same model tier, default flow — single attempt with second-LLM review), Grok Build (same model tier where possible, default flow). Antigravity and OpenAI Operator deferred to Phase 5.
-- **Conditions.** Same prompts, same model tier per task family, same time budget, same wall-clock allowance. Each subject runs in its own environment, with its own sandbox, on the same hardware class.
+- **Scope.** The 20 coding tasks in §9.1 (all fix-this-failing-test per the §17 wedge), plus the 10 research tasks, plus the 20+ adversarial cases from §8.7. Three subjects: this system with §6.8 looped verification, Claude Code (Pro, same model class, default flow — single attempt with second-LLM review), Grok Build (same model class where possible, default flow). Antigravity and OpenAI Operator deferred to Phase 5.
+- **Conditions.** Same prompts, same model class per task family, same time budget, same wall-clock allowance. Each subject runs in its own environment, with its own sandbox, on the same hardware class.
 - **Metrics per subject.** Pass rate, false-success rate, total cost in USD, total tokens in/out, time-to-verified, percentage of tasks that required human intervention, number of unauthorised actions attempted and how the subject handled them.
 - **Acceptance criteria for any public "better" claim.** A subject wins on a metric only if the result holds across two consecutive runs of the full suite, with a one-tailed binomial test at p < 0.05 against the strongest competitor. Anything weaker is reported as "trend, not yet significant".
 - **Reporting.** A single table per release, published alongside the design document. Numbers, not adjectives.
@@ -838,7 +848,7 @@ New product requirements from the owner: (1) users can hand-build custom agents 
 
 A custom agent, an AI-built agent and a premade agent are the **same artifact: a versioned AgentSpec** run by the one engine. The AI builder is only an authoring aid that produces a draft spec; it has no special privileges. This keeps "a new agent" cheap (a file, not new infrastructure) while preserving the rule from §1 against agent hierarchies and bespoke agent code.
 
-**AgentSpec fields:** `id`, `name`, `description`, `version`, `owner`, `instructions`, `skills` (SKILL.md references), `allowed_tools` (subset of the registry), `permission_request` (paths, hosts, accounts it would like), `risk_tier`, `input_schema`, `output_schema`, `min_model_profile` (capabilities it needs), `preferred_tier` (cheap / mid / strong), `budget_defaults`, `evals` (task cases with checkers), `provenance` (author, signature, changelog).
+**AgentSpec fields:** `id`, `name`, `description`, `version`, `owner`, `instructions`, `skills` (SKILL.md references), `allowed_tools` (subset of the registry), `permission_request` (paths, hosts, accounts it would like), `risk_tier`, `input_schema`, `output_schema`, `min_model_profile` (capabilities it needs), `preferred_class` (cheap / mid / strong), `budget_defaults`, `evals` (task cases with checkers), `provenance` (author, signature, changelog).
 
 **Hard rules**
 
@@ -864,7 +874,7 @@ The Builder treats pasted documents, URLs and examples as untrusted data like an
 - **Capability registry per model:** context size, tool-calling style, strict structured output support, vision, listed price, rate limits, data-retention and region terms (as stated by the vendor; unverified claims are labelled).
 - **Conformance suite:** when a user adds a model, the platform runs a fixed probe set (valid tool-call format, JSON schema adherence under load, long-context recall, instruction ordering, refusal on injected instructions, cost per probe) and stores scores. These are **measured**, not vendor-claimed.
 - **Gating by evidence:** each agent's `min_model_profile` is checked against the conformance scores; the UI shows, before enabling, how that agent performed on the user's chosen model (for example eval pass rate and cost per verified run). A model that fails a high-risk agent's threshold is blocked from that role or must be paired with a stronger reviewer.
-- **Routing:** the router maps roles to the user's model pool (cheap / mid / strong tiers, fallbacks); the rules in §6.6 apply to whatever pool exists. Pools can be set per project.
+- **Routing:** the router maps roles to the user's model pool (cheap / mid / strong classs, fallbacks); the rules in §6.6 apply to whatever pool exists. Pools can be set per project.
 - **Data governance:** per-project allowed-provider list so sensitive projects can be restricted to local or chosen providers; a first-use notice states what data leaves the machine.
 - **Security independence:** policy never depends on which model is used. Weaker models are more likely to emit malformed or hostile calls, which the gateway blocks identically.
 
@@ -895,7 +905,7 @@ Users compose agents into workflows: a directed graph where each node is an agen
 
 - **Phase 0 changes:** define AgentSpec and the model-capability schema alongside TaskPlan so the engine is built around specs from day one; retrofitting is expensive.
 - **New backlog items** (in addition to the canonical B1–"B16 list in §14.3): AgentSpec validator; spec-driven agent runner; model adapter interface with two providers plus a generic OpenAI-compatible adapter; conformance suite; capability registry; spec editor (CLI and YAML first); Builder agent (draft only); first three premade agents with evals; enable/disable flow with permission diff; **WorkflowSpec** schema + validator + DAG executor (covers the §16.10 custom-workflow story); **ScheduleSpec** schema + in-process scheduler (cron-like, no Temporal server); §6.8 looped-verification executor (independent re-check, best-of-N, cost guard). **`AutomationSpec` schema and validator (designed in §16.11, no B-item; promote to B-list if the wedge passes §17.4 and we want a second product surface).** The **decision-trace fields** consumed by the §16.9 learned-controller analysis are added as an extension to the B2 audit log (state features, action taken, action probabilities where randomized, outcome, model, retries, cost, human intervention), not as a separate B-item.
-- **Experiment E1 widens:** run the benchmark per model, not per tier, so the conformance and eval scores are real numbers.
+- **Experiment E1 widens:** run the benchmark per model, not per class, so the conformance and eval scores are real numbers.
 - **Positioning (§15.1 still applies):** a defensible differentiator is measured reliability per model and per agent under enforced policy. It is a hypothesis until the head-to-head in §15.5; competitors' model-choice and agent-library features were not verified here.
 
 ### 16.8 Horizon: next six months, possible team
@@ -1024,7 +1034,7 @@ This section was written after the comparison answer ("it will only be better on
 
 ### 17.1 Where we are narrowly better, with caveats
 
-1. **Choice of model, with evidence.** None of the four competitors is known to ship a measured conformance score for each model against the user's own tasks before enabling an agent. The §16.3 conformance suite does. The catch: the cost advantage only materializes if orchestration closes the quality gap between cheap and strong tiers, which is **unmeasured (E1)**.
+1. **Choice of model, with evidence.** None of the four competitors is known to ship a measured conformance score for each model against the user's own tasks before enabling an agent. The §16.3 conformance suite does. The catch: the cost advantage only materializes if orchestration closes the quality gap between cheap and strong classs, which is **unmeasured (E1)**.
 2. **Isolation by design.** Grok Bot's shared computer is a documented trade-off. The §4 per-task sandbox with short-lived credentials and an egress proxy is safer for work touching client data or production. This matters most to people who currently do not trust agents with real access.
 3. **A "done" you can trust.** Most agents say they finished. The §6.3 state machine refuses to say `succeeded` without verifier evidence, §9.2 tracks false-success rate as a first-class metric, and the §6.8 loop keeps trying until the result is right or the budget is spent. For software tasks with real tests, this should mean fewer silent failures. It only works where success is machine-checkable, which is a minority of business work.
 4. **Provider independence.** Vendors have little incentive to make swapping them out easy. The §16.3 adapter layer with a measured conformance score is something they are structurally unlikely to build well.
@@ -1066,7 +1076,7 @@ The first 20 tasks in §9.1 are now pinned to this shape: 10 single-file bugs, 5
 
 Stop and reassess, do not keep building, if any of the following happens:
 
-1. **E1 fails.** A cheap tier + looped verification does not get within 15% of a strong tier on the wedge benchmark, after two runs. The cost story collapses.
+1. **E1 fails.** A cheap class + looped verification does not get within 15% of a strong class on the wedge benchmark, after two runs. The cost story collapses.
 2. **Adversarial suite fails.** A single protected-action test in §8.7 is not blocked by the gateway, or the §6.8 loop fails to catch an answer-passing-but-wrong case from the new adversarial class. The safety story collapses.
 3. **§15.5 head-to-head is negative.** After two consecutive runs, we do not beat Claude Code Pro on cost-per-verified-task on the wedge. The competitive wedge does not exist.
 4. **Approval fatigue is unmanageable.** E3 shows users click through more than 30% of approvals without reading. The safety story has decayed in practice.
@@ -1093,12 +1103,12 @@ v0.7 shipped with 10 known design holes flagged in the hole-finding pass. v0.8 c
 
 1. **H1 (WorkflowSpec edge check is unimplementable for LLM output).** Fix: §16.10 now says the edges are validated by a *compile-time structural check* (do types align?) *plus* a *first-run conformance probe* (the orchestrator runs a sample input through the upstream node and validates the output against the downstream node's `input_schema`; the probe is cached and re-checked when the upstream `AgentSpec` version changes). Same fix applied to §16.11.
 2. **H2 (AutomationSpec oversells node kinds).** Fix: dropped `wait` and `merge`/`join` from the node-kind list (use a `WorkflowSpec` for those cases). Also removed `merge` from `json.transform`'s operators. The schema now has 7 kinds, not 9. Less surface, less to validate, fewer ways to misconfigure.
-3. **H3 (§6.8 re-derivation defaults were undefined).** Fix: new sub-section §6.8.1 pins the re-derivation prompt template (no peeking at the proposer's output), the default model-tier choice (different from the proposer), and the behavior-match tolerance (`git diff --stat` within ±2 files / ±20 lines). B1 ships a `behavior_match(a, b, tolerance)` helper and a known-match / known-mismatch test set.
+3. **H3 (§6.8 re-derivation defaults were undefined).** Fix: new sub-section §6.8.1 pins the re-derivation prompt template (no peeking at the proposer's output), the default model-class choice (different from the proposer), and the behavior-match tolerance (`git diff --stat` within ±2 files / ±20 lines). B1 ships a `behavior_match(a, b, tolerance)` helper and a known-match / known-mismatch test set.
 4. **H4 (single-machine ceiling was unmeasurable).** Fix: §9.7 now lists four concrete conditions (concurrent-sandbox ceiling at 5 for >30 min/day, task queue depth >10 for >5 min/day, `host_cpu_p95` >80% for >10 min/day, `DecisionTrace` cap events >50/day) for two consecutive weeks. The migration to a managed sandbox or a second host is a measured step, not a planned one.
 5. **H5 (§6.4 retry cap and §6.8 best-of-N were competing mechanisms).** Fix: §6.4 now states the per-step retry cap and `budgets.max_attempts` are *independent*: a task with `max_attempts=5` gets 5 best-of-N attempts, each allowing §6.4's 2 per-step retries, for a maximum of 10 step retries. The wedge sets `max_attempts=5`.
 6. **H6 (four distinct concurrency numbers, not one).** Fix: §15.3 names four kinds of concurrency (tasks, steps, model calls, sandboxes) and gives each a default and a ceiling, with a measurement to justify raising the cap. The orchestrator emits a `DecisionTrace` whenever it caps a run.
 7. **H7 (in-process scheduler won't survive restarts but `ScheduleSpec` cron needs that).** Fix: Phase 2 ships two scheduler components. The in-process queue handles retries of currently running tasks. The durable scheduler handles future scheduled runs and is backed by DBOS in Phase 3. Until then, schedules are best-effort: if the process is down at the trigger time, the run is dropped and the user is alerted.
-8. **H8 (DecisionTrace fields were named not typed).** Fix: new sub-section §8.9 pins a single Pydantic `DecisionTrace` model (**17 fields** including `candidate_actions` for counterfactual analysis; the figure was 13 in the v0.7 → v0.8 drafting notes and has been corrected to 17 after §8.9 was finalised). B1 ships the model, three traces at version 1, and the audit-log writer that emits them.
+8. **H8 (DecisionTrace fields were named not typed).** Fix: new sub-section §8.9 pins a single `DecisionTrace` type (**Go struct, 17 fields**, including `candidate_actions` for counterfactual analysis; the figure was 13 in the v0.7 → v0.8 drafting notes and was corrected to 17 after §8.9 was finalised; the Pydantic framing in v0.6-v0.8 is historical, the PRD uses Go). B1 ships the type, three traces at version 1, and the audit-log writer that emits them.
 9. **H9 (conformance suite had no thresholds).** Fix: §8.8 now states the numbers: at least 95% block rate on each of the §8.7 classes (target: 100% on T1—T9 and the §6.8 answer-passing-but-wrong class), 0% false-success on the §9.1 verification-positive set, and <2% false-block. CI fails the build on any regression. A single regression to <95% on a class is a re-design, not a fix-and-go.
 10. **H10 (B1 "15 unit tests" was a placeholder).** Fix: B1 now ships 94 tests, broken down by schema (see §17.5). The 94 is the v0.8 floor; B2 (audit log) and B3 (state machine) add their own.
 

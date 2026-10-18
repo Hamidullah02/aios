@@ -76,7 +76,7 @@ not in the registry.
 | `name` | string | yes | The name of the role. |
 | `system_prompt` | string | yes | The system prompt. |
 | `tools` | list of string | yes | The list of tools. |
-| `model_tier` | string | yes | The model tier. |
+| `model_class` | string | yes | The model class. |
 | `output_format` | string | yes | The output format. |
 | `temperature` | float | no | The temperature. |
 | `max_tokens` | int | no | The max tokens. |

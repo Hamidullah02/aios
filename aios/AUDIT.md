@@ -79,7 +79,7 @@ records $0.0000 median cost. The 493 tests pass, but the
 incurs a cost, so every "median cost per verified task"
 measurement is structurally zero.
 
-What works: the *interface* is right. The router picks a tier,
+What works: the *interface* is right. The router picks a class,
 the worker calls the adapter, the adapter returns a response,
 the budget meter charges `cost_usd` from the response. Phase 1
 swaps the fake for a real adapter.
@@ -204,8 +204,9 @@ check" as the four code-first verifier primitives. B10 ships
 TaskPlan's `outputs` schema) and the `DiffScopeVerifier`
 (ensure the patch only touched files in `scope.paths`) are
 not in the package. The wedge happens to use
-`CommandVerifier("pytest -q")`, so the 20 tasks pass, but
-a real codebase with non-Python outputs is uncovered.
+`CommandVerifier("go test ./...")`, so the 20 tasks pass, but
+a real codebase with non-Go outputs (or a Go codebase with
+build-tag-specific tests) is uncovered.
 
 **Risk:** "answer-passing-but-wrong" (§6.8, the new
 adversarial class) is exactly what the schema + diff-scope
@@ -328,14 +329,14 @@ to plumb the trace count into the result.
 ### H6. The §15.5 head-to-head benchmark is not built
 
 §17.4 K3 says the §15.5 head-to-head benchmark is one of
-the kill conditions. B15 ships a *two-tier internal
+the kill conditions. B15 ships a *two-class internal
 benchmark* (cheap vs strong, both stubs) that proves the
 runner works. The actual head-to-head against Claude
 Code, Grok Build, Antigravity, OpenAI Operator (§15.5)
 is not built.
 
 **Risk:** we cannot tell if we are competitive. The
-internal two-tier comparison will not move the §17.4
+internal two-class comparison will not move the §17.4
 needle; it only proves the harness.
 
 **Fix:** the head-to-head harness is a runner that, for
@@ -398,21 +399,22 @@ by a stale tag or a wrong cross-reference, but they
 are not blockers. I have not re-checked each one; the
 v0.9 work item is the right place.
 
-### M4. The model-tiers naming is fragile
+### M4. The model-class naming is fragile
 
-B8's `ModelTier = str  # 'cheap' | 'mid' | 'strong' | 'none'`
-is a string literal with a comment. There is no enum,
-no validation that a `ModelCall(tier="foo")` raises
-early. The router and adapter assume the strings are
-well-formed; an unknown tier is silently treated as
+B8's `ModelClass = Class  # 'cheap' | 'mid' | 'strong' | 'none'`
+is a string-typed enum with a comment. There is no validator,
+no validation that a `ModelCall(class="foo")` raises
+early. The router and adapter assume the values are
+well-formed; an unknown class is silently treated as
 "cheap" (or as the fallback chain's `none`).
 
-**Risk:** a typo in a model name produces a wrong call
-that still gets through. The audit log records the tier,
+**Risk:** a typo in a class name produces a wrong call
+that still gets through. The audit log records the class,
 so the mistake is traceable, but it is not blocked.
 
-**Fix:** make `ModelTier` a `Literal["cheap","mid","strong","none"]`
-or an `Enum`. Pydantic's `Field` will validate. One
+**Fix:** make `ModelClass` a typed string (or a Go
+`string` with a `Validate()` method that accepts
+only `"cheap"`, `"mid"`, `"strong"`, `"none"`). One
 file change.
 
 ### M5. The orchestrator's private-attribute access is fragile
@@ -530,7 +532,7 @@ The design's value proposition (§1):
 
 * The **time-to-first-task** is not measured. A
   non-technical user with the system today would need to:
-  install Python, set up SQLite, write a TaskPlan, run
+  install Go, set up SQLite, write a TaskPlan, run
   the orchestrator. There is no onboarding, no sample
   repo, no "click here to run a bug-fix demo" path. The
   Phase 2 spec editor + UI is the answer, but the design
@@ -549,10 +551,10 @@ The design's value proposition (§1):
 **What the design does not yet prove:**
 
 * The "looped verification" claim (§6.8 + §15.4) — that
-  a cheap tier + code-first verifier + occasional
-  second-model review is *within 15%* of a strong tier
+  a cheap class + code-first verifier + occasional
+  second-model review is *within 15%* of a strong class
   on the wedge. §17.4 E1 is the kill condition; it has
-  not been measured. The B15 two-tier run uses the same
+  not been measured. The B15 two-class run uses the same
   stub, so it cannot answer this. This is the
   single most important measurement before Phase 2.
 * The "operator cost is bounded" claim. The §9.3 numbers
@@ -580,7 +582,7 @@ The design's value proposition (§1):
    consideration" footnote; ship WorkflowSpec + ScheduleSpec
    as the n8n replacement, full stop.
 4. **Add a "first run" sample.** A `examples/fix-a-bug/`
-   directory with: a tiny broken Python project, a
+   directory with: a tiny broken Go project, a
    TaskPlan JSON, a `run.sh`, an expected report. This
    takes an hour and turns the design from "spec" to
    "product someone can try in 5 minutes."
@@ -637,7 +639,7 @@ addressed before the first paying customer:**
 answer:**
 
 The "looped verification is within 15% of a strong
-tier" claim (§17.4 E1) is unmeasured. This is the
+class" claim (§17.4 E1) is unmeasured. This is the
 most important experiment in the next 30 days. The
 B15 harness is ready; the missing piece is one real
 model adapter and one real benchmark run.

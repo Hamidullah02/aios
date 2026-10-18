@@ -11,7 +11,8 @@ dist/
 # Editor
 .vscode/
 .idea/
-
+.puku
+puku
 # OS
 .DS_Store
 Thumbs.db

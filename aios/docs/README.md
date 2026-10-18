@@ -53,6 +53,7 @@ merged into the main project after each module is finished.
 | aios-optimizer | `modules/aios-optimizer/` | Tiered model router with cost optimization |
 | aios-approvals | `modules/aios-approvals/` | Approval service |
 | aios-persist | `modules/aios-persist/` | Always-allow rules, checkpoint, handoff |
+| aios-memory | `modules/aios-memory/` | Content-addressed memory and context manager (the moat) |
 
 ### Capability Layer
 
@@ -62,7 +63,7 @@ merged into the main project after each module is finished.
 | aios-search | `modules/aios-search/` | Glob search, content search, file read at scale |
 | aios-edit | `modules/aios-edit/` | String edit, line edit, file write at scale |
 | aios-git | `modules/aios-git/` | Diff, commit, branch, log, merge |
-| aios-memory | `modules/aios-memory/` | Key-value store with namespacing and TTL |
+
 | aios-watch | `modules/aios-watch/` | File system watcher |
 | aios-fanout | `modules/aios-fanout/` | Parallel sub-agent runner |
 | aios-retry | `modules/aios-retry/` | Retry policy with error feedback |

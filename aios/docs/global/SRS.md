@@ -118,17 +118,52 @@ exhausted.
 
 ## 9. Approval Requirements
 
-**REQ-GLB-APR-001** Every tier-3 action shall route
-to the approval service. The approval service shall
-block until the operator responds.
+The approval contract has four tiers. Tier
+definitions are in the global PRD §11.5.
 
-**REQ-GLB-APR-002** The approval service shall
-persist the decision. The decision shall be stored
-in the audit log.
+- **Tier 0** — read-only, local. No approval.
+- **Tier 1** — local write, reversible. No
+  approval.
+- **Tier 2** — network or new connector
+  scope. Approval **once per task scope**,
+  not per call. Allowlisted host is
+  auto-allowed; non-allowlisted host is
+  tier 2.
+- **Tier 3** — irreversible or privileged.
+  Always requires explicit approval, every
+  time.
 
-**REQ-GLB-APR-003** The approval service shall
-support the "always" option. The "always" option
-shall create a standing rule in `github.com/<org>/aios/internal/persist`.
+**REQ-GLB-APR-001** Every tier-2 (non-
+allowlisted host) and tier-3 action shall
+route to the approval service. The approval
+service shall block until the operator
+responds. Tier-2 approvals are once-per-task-
+scope. Tier-3 approvals are once-per-call.
+
+**REQ-GLB-APR-002** The approval service
+shall persist the decision. The decision
+shall be stored in the audit log. The
+decision row shall include the action, the
+action hash, the principal, the channel, and
+the expiry.
+
+**REQ-GLB-APR-003** Approvals shall be
+one-use, hash-bound, and expiring. A
+standing approval (a rule that applies to a
+class of actions for the rest of the
+session) is **not** allowed for tier-3
+actions. The gateway shall reject any
+`aios allow add` rule that matches a tier-3
+action at insertion time. The rejection is
+enforced by code, not by convention.
+
+**REQ-GLB-APR-004** When the gateway cannot
+reach the human (no approval channel
+available), tier-3 actions shall be blocked.
+The block shall be recorded. The run shall
+be paused. Tier-2 actions on allowlisted
+hosts may proceed; tier-2 actions on non-
+allowlisted hosts are also blocked.
 
 ## 10. Retry Requirements
 
@@ -146,10 +181,20 @@ a per-error-type limit.
 
 ## 11. Verify Requirements
 
-**REQ-GLB-VRF-001** Every task result shall go
-through the self-check before the task is marked
-as done. The self-check shall return one of the
-three statuses: `pass`, `fail`, `inconclusive`.
+**REQ-GLB-VRF-001** Every task result shall
+go through the verify layer before the task
+is marked as done. The verify layer is run
+by the orchestrator, not by the agent. The
+agent cannot skip the verify layer. The
+verify layer shall return one of the three
+statuses: `pass`, `fail`, `inconclusive`.
+**`inconclusive` is treated as `fail`**: the
+task is marked **blocked**, not done. The
+verify layer is code-first: it runs the
+project's tests, it validates the output
+schema, and it checks the acceptance
+criteria from the spec. The agent's self-
+evaluation is never a verify result.
 
 **REQ-GLB-VRF-002** The verify module shall
 support a `goal` argument. The goal shall be
@@ -241,68 +286,234 @@ always be derived from the verify result.
 
 ## 16. Determinism Requirements
 
+The system around the model is deterministic,
+auditable, and replayable. Model variance is
+measured and bounded, not eliminated. The
+requirements in this section state the
+contract for the system around the model.
+
 **REQ-GLB-DET-101** The plan object shall be
 immutable after the orchestrator dispatches the
 first task. The plan object shall be content
 addressed. The plan id shall be the SHA-256 of
-the plan payload.
+the plan payload. A replan creates a new plan
+with a new id and a new audit row; the prior
+plan remains in the audit log.
 
 **REQ-GLB-DET-102** The policy object shall be
-immutable after the run starts. The policy
-object shall be content addressed. The policy
-id shall be the SHA-256 of the policy payload.
+immutable for the run **except for
+tightening**. Tightening is allowed: revoking
+a tool, blocking a host, raising a tier, or
+invoking the kill switch. Loosening is
+forbidden mid-run. The policy is content
+addressed; the policy id is the SHA-256 of
+the policy payload; the policy version
+history is preserved in the audit log.
 
 **REQ-GLB-DET-103** The clock shall be injected
-through a typed interface. The interface shall
-expose `Now() time.Time`. The default
+through a typed interface. The interface
+shall expose `Now() time.Time`. The default
 implementation shall use the wall clock. The
 test implementation shall use a fixed clock.
+The injected clock is used in **decision
+paths**: plan dispatch, approval timestamps,
+audit row timestamps, and the memory
+timeline. The wall clock is used in
+**deadline paths**: per-tool timeouts, the
+daily cost cap, the per-run budget, and
+approval expiry. The split is explicit and
+documented in the clock interface contract.
 
-**REQ-GLB-DET-104** The file system shall be
-identified by content hash. The hash shall be
-SHA-256. The hash shall be computed at the
-moment the file is written. The hash shall be
-recorded in the audit row.
+**REQ-GLB-DET-104** Artifacts in the memory,
+the audit log, the checkpoint store, and the
+plan store shall be identified by content
+hash. The hash shall be SHA-256. The hash
+shall be computed at the moment the artifact
+is written. The hash shall be recorded in the
+audit row. **Path strings remain in the
+decision path** for policy scope matching
+(`./src/**`) and diff-scope matching. Hashes
+identify artifacts; paths locate them.
 
 **REQ-GLB-DET-105** The model call shall accept
-a temperature argument. The default temperature
-shall be 0. The router shall reject any call
-with a temperature above 0 unless the call is
-wrapped in a section tagged as non-deterministic.
+a `temperature` argument. The default
+`temperature` shall be the lowest value the
+provider supports. When the provider does not
+support `temperature`, the absence shall be
+recorded in the model call metadata, not
+silently treated as zero. The recorded model
+output shall be persisted with the call.
+Best-effort `temperature=0` reduces variance;
+it is not a determinism guarantee.
 
 **REQ-GLB-DET-106** The checkpoint shall be
 content addressed. The checkpoint id shall be
 the SHA-256 of the checkpoint payload. The
 checkpoint payload shall be a JSON object.
+The checkpoint shall include the recorded
+model outputs for every call in the run.
 
 **REQ-GLB-DET-107** The replay command shall
-re-execute the plan from a checkpoint. The
-replay shall use the same model adapter, the
-same model id, the same temperature, and the
-same role resolver. The replay shall produce an
-equivalent audit log for every step that does
-not involve the model.
+re-execute a recorded session using the
+**recorded model outputs**. The replay shall
+not re-call the model. The replay shall be a
+pure function of the recorded outputs, the
+recorded inputs, the recorded plan, the
+recorded policy, the recorded pin set, and
+the pinned sandbox image. Two replays of the
+same session on the same pinned image shall
+produce the same audit log. Live re-execution
+is not part of the replay contract.
 
 **REQ-GLB-DET-108** The diff command shall
 compare two runs of the same plan. The diff
-shall be over the audit log and the tool
-results. The diff shall be in unified diff
-format.
+shall be over the audit log, the recorded
+model outputs, and the tool results. The diff
+shall be in unified diff format. The diff
+shall work for two runs of the same plan on
+the same host and for two runs on different
+hosts, provided both hosts have the same
+pinned sandbox image and the same recorded
+outputs.
 
 **REQ-GLB-DET-109** The system shall be
-reproducible on a second host. Two hosts given
-the same input, the same plan, the same
-approvals, the same model, the same
-temperature, and a fixed clock shall produce
-the same audit log and the same outcome.
+**reproducible** on a second host under the
+following conditions: the same input, the
+same plan, the same policy, the same
+recorded model outputs, the same pin set,
+the same approval history, a fixed clock for
+decision paths, and a pinned sandbox image
+with pinned dependency versions. Under these
+conditions, the system shall produce the
+same audit log and the same outcome.
+**Live re-execution with fresh model calls is
+not reproducible**; the variance is recorded
+in the bench, not eliminated by the system.
 
 **REQ-GLB-DET-110** The system shall not use
 the global random number generator in any
 decision path. The system shall inject a
-seeded random source. The default seed shall
-be derived from the run id.
+seeded random source through a typed
+interface. The default seed shall be derived
+from the run id. The seeded random is
+replayable: the same seed produces the same
+sequence.
 
-## 17. Non-Functional Requirements
+**REQ-GLB-DET-111** The system shall record
+the actual model output for every model
+call. The recording is the source of truth
+for replay. The recording is the source of
+truth for the bench's variance analysis. The
+recording includes the model id, the model
+class, the `temperature` value or its
+absence, the prompt hash, the output hash,
+the token count, the cost, and the latency.
+
+**REQ-GLB-DET-112** The variance between two
+live runs of the same plan on the same
+input shall be measured. The measurement
+shall record the number of differing
+recorded model outputs, the number of
+differing tool results, and the number of
+differing audit rows. The measurement is
+exposed through `aios bench regression`.
+
+**REQ-GLB-DET-113** The system shall not
+pretend the model is a function. The
+documentation, the CLI output, the bench
+output, and the report shall state the
+variance, not the false promise of
+determinism. The thesis is reproducibility
+and auditability, not determinism.
+
+**REQ-GLB-DET-114** The policy file, the
+roles file, the rules file, and the
+retention file shall live outside the
+workspace. The sandbox shall not have write
+access to any of these files. The agent
+shall not be able to reach the policy
+socket, the roles socket, or the rules
+socket. The control channel is a Unix
+domain socket bound to a path the sandbox
+cannot reach, authenticated by a one-shot
+token the agent never holds.
+
+## 17. Memory Requirements
+
+The memory is the moat. The memory is the
+content-addressed knowledge base that gives
+the agent a context that is bigger, better, and
+more honest than the competition. This section
+states the cross-module requirements for the
+memory. The per-module SRS for aios-memory is
+the source of truth for the module detail.
+
+**REQ-GLB-MEM-001** The memory shall be
+content-addressed. Every artifact shall be
+identified by its content hash. The content
+hash shall be the SHA-256 of the artifact
+payload.
+
+**REQ-GLB-MEM-002** The memory shall support
+three scopes: `session`, `project`, `user`.
+The session scope shall die when the session
+ends. The project scope shall persist across
+sessions in the same project. The user scope
+shall persist across projects.
+
+**REQ-GLB-MEM-003** The memory shall support
+three layers: `raw`, `indexed`, `compacted`.
+The raw layer shall be append-only. The
+indexed layer shall be the typed view. The
+compacted layer shall be the lossy view that
+fits the context budget.
+
+**REQ-GLB-MEM-004** The orchestrator shall
+retrieve context through the memory, not
+through a message buffer. The retrieval
+algorithm shall be a pure function of the
+indexed layer, the query, the pin set, the
+current task id, and the budget.
+
+**REQ-GLB-MEM-005** The orchestrator shall
+honor the pin set. Pinned artifacts shall
+always be included in the compacted view
+regardless of the budget.
+
+**REQ-GLB-MEM-006** The planner, the verifier,
+the reporter, and the fan-out runner shall
+use the memory to store decisions,
+observations, tool results, and model
+outputs. The memory shall be on the critical
+path of every model call.
+
+**REQ-GLB-MEM-007** The CLI shall provide the
+`aios memory` subcommand. The CLI shall print
+output as grep-friendly JSON.
+
+**REQ-GLB-MEM-008** The memory shall be
+observable. The developer shall be able to
+inspect any artifact by content hash. The
+developer shall be able to diff two
+sessions. The developer shall be able to
+prune noise. The developer shall be able to
+pin important artifacts across all compacted
+views.
+
+**REQ-GLB-MEM-009** The memory shall persist
+across sessions. A decision made in session
+A shall be retrievable in session B through
+a query. The project scope shall be
+`git`-trackable.
+
+**REQ-GLB-MEM-010** The memory shall not be
+the only determinism source. The memory
+shall be a content-addressed key-value
+store. The memory shall not own the audit
+log. The audit log lives in
+`github.com/<org>/aios/internal/persist`.
+
+## 18. Non-Functional Requirements
 
 **REQ-GLB-NFR-001** The system shall run on Go
 1.23.

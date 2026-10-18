@@ -5,7 +5,7 @@
 This document states the product requirements for the
 aios-roles module. The module is the agent role
 registry. The module maps roles to system prompts,
-tool sets, and model tiers. The module lets the
+tool sets, and model classes. The module lets the
 planner and the orchestrator use the right
 configuration for every task.
 
@@ -40,7 +40,7 @@ document.
 | Role | A named configuration for an agent. |
 | System prompt | The prompt that sets the agent behavior. |
 | Tool set | The list of tools the agent can use. |
-| Model tier | The model capability level for the agent. |
+| Model class | The model capability level for the agent: cheap, mid, or strong. |
 
 
 ## 5. Determinism
@@ -95,7 +95,7 @@ functions.
   file.
 - The role resolver returns the configuration.
 - The default roles cover the common cases.
-- The test suite has a 100 percent pass rate.
+- The behavioural test suite has a 100 percent pass rate.
 
 ## 11. Out of Scope
 

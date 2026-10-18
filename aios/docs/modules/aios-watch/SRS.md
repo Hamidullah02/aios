@@ -68,7 +68,7 @@ list of events. Each event includes the path, the
 event type, and the timestamp.
 
 **REQ-WTC-FWT-005** The tool shall respect the
-`.aiosignore` file from aios-memory.
+`.aiosignore` file from aios-core.
 
 **REQ-WTC-FWT-006** The tool shall write an audit
 row. The row type shall be `file_watch`.

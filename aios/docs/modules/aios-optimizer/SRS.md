@@ -22,26 +22,27 @@ module. The module is a Go package.
 
 | Term | Definition |
 | --- | --- |
-| Tier | A typed string: strong, medium, weak. |
+| Class | A typed string: cheap, mid, strong. |
 | Fingerprint | A typed SHA-256 hash. |
 | Pass rate | A typed float between 0 and 1. |
-| Override | A typed string: strong, medium, weak, off. |
+| Override | A typed string: cheap, mid, strong, off. |
 
 ## 5. Functional Requirements
 
-### 5.1 Tiered Model Registry
+### 5.1 Class-Based Model Registry
 
-**REQ-OPT-REG-001** The module shall provide the
-`TieredModelRegistry` type. The type shall hold
-the list of tiers.
+**REQ-OPT-REG-001** The module shall provide
+the `ClassBasedModelRegistry` type. The type
+shall hold the list of classes.
 
-**REQ-OPT-REG-002** A tier shall have a `name`, a
-`model_id`, a `cost_per_1k_input`, a
-`cost_per_1k_output`, and a `context_window`.
+**REQ-OPT-REG-002** A class shall have a
+`name`, a `model_id`, a `cost_per_1k_input`,
+a `cost_per_1k_output`, and a
+`context_window`.
 
 **REQ-OPT-REG-003** The default registry shall
-include one model per tier. The operator can
-override the registry through the config.
+include one model per class. The operator
+can override the registry through the config.
 
 ### 5.2 Call Fingerprint
 
@@ -68,26 +69,28 @@ function shall be a pure function of the inputs.
 ### 5.3 Cost/Quality Table
 
 **REQ-OPT-CQT-001** The module shall provide the
-`CostQualityTable` type. The type shall hold the
-empirical pass rate and the empirical cost per
-(fingerprint, tier) pair.
+`CostQualityTable` type. The type shall hold
+the empirical pass rate and the empirical
+cost per (fingerprint, class) pair.
 
 **REQ-OPT-CQT-002** The table shall be loaded
 from `var/optimizer.json`. The file is a JSON
 object. The file is content addressed. The file
 id is the SHA-256 of the file payload.
 
-**REQ-OPT-CQT-003** The table shall provide the
-`Get` method. The method shall accept a
-fingerprint and a tier. The method shall return
-the pass rate, the call count, and the average
+**REQ-OPT-CQT-003** The table shall provide
+the `Get` method. The method shall accept a
+fingerprint and a class. The method shall
+return the pass rate, the call count, and the
+average
 empirical cost. The method shall return nil when
 the pair is not in the table.
 
-**REQ-OPT-CQT-004** The table shall provide the
-`Record` method. The method shall accept a
-fingerprint, a tier, an empirical cost, and a
-verify result. The method shall update the table.
+**REQ-OPT-CQT-004** The table shall provide
+the `Record` method. The method shall accept
+a fingerprint, a class, an empirical cost,
+and a verify result. The method shall update
+the table.
 
 **REQ-OPT-CQT-005** The table shall provide the
 `Reset` method. The method shall clear the table.
@@ -105,8 +108,8 @@ write shall be atomic through a `rename` syscall.
 computed from the verify results. The verify
 result is a boolean. The pass rate is the
 fraction of `true` results in the last N calls at
-the (fingerprint, tier) pair. The default N is
-20.
+the (fingerprint, class) pair. The default N
+is 20.
 
 **REQ-OPT-EPR-002** The pass rate shall be a
 float between 0 and 1. The pass rate shall be
@@ -129,9 +132,9 @@ the table, and the budget.
 fingerprint, an override, and a budget. The
 method shall return a `RoutingDecision`.
 
-**REQ-OPT-RTE-003** The decision shall include
-the `tier`, the `model_id`, the `reason`, and
-the `source`.
+**REQ-OPT-RTE-003** The decision shall
+include the `class`, the `model_id`, the
+`reason`, and the `source`.
 
 **REQ-OPT-RTE-004** The `source` shall be one of
 the following values.
@@ -147,40 +150,42 @@ the following values.
 - `optimizer_off`. The decision came from the
   `--optimizer=off` flag.
 
-**REQ-OPT-RTE-005** The router shall return the
-override tier when the override is set. The
-router shall record the decision as `override`.
+**REQ-OPT-RTE-005** The router shall return
+the override class when the override is set.
+The router shall record the decision as
+`override`.
 
 **REQ-OPT-RTE-006** The router shall return the
-strong tier for every call when the override is
+strong class for every call when the override is
 `off`. The router shall record the decision as
 `optimizer_off`.
 
-**REQ-OPT-RTE-007** The router shall look up the
-fingerprint in the table when the override is
-empty. When the fingerprint is in the table, the
-router shall return the tier with the highest
-pass rate per unit cost. When the fingerprint is
-not in the table, the router shall use the
-default rule.
+**REQ-OPT-RTE-007** The router shall look up
+the fingerprint in the table when the
+override is empty. When the fingerprint is in
+the table, the router shall return the class
+with the highest pass rate per unit cost.
+When the fingerprint is not in the table, the
+router shall use the default rule.
 
-**REQ-OPT-RTE-008** The default rule shall be
-`cost_first`. The router shall return the weakest
-tier. The operator can change the default rule
-through the config.
+**REQ-OPT-RTE-008** The default rule shall
+be `cost_first`. The router shall return the
+cheapest class. The operator can change the
+default rule through the config.
 
-**REQ-OPT-RTE-009** The router shall enforce the
-budget. When the budget is exhausted, the router
-shall return the weakest tier that fits the
-remaining budget. When no tier fits, the router
+**REQ-OPT-RTE-009** The router shall enforce
+the budget. When the budget is exhausted,
+the router shall return the cheapest class
+that fits the remaining budget. When no
+class fits, the router
 shall return an error.
 
 ### 5.6 Override Surface
 
 **REQ-OPT-OVR-001** The CLI shall accept the
-`--tier` flag. The flag shall accept the values
-`strong`, `medium`, `weak`, and `auto`. The
-default is `auto`.
+`--class` flag. The flag shall accept the
+values `strong`, `mid`, `cheap`, and `auto`.
+The default is `auto`.
 
 **REQ-OPT-OVR-002** The CLI shall accept the
 `--optimizer` flag. The flag shall accept the
@@ -201,9 +206,9 @@ print the cost/quality table.
 the `--fingerprint` flag. The flag shall filter
 the table to a single fingerprint.
 
-**REQ-OPT-STA-003** The subcommand shall accept
-the `--tier` flag. The flag shall filter the
-table to a single tier.
+**REQ-OPT-STA-003** The subcommand shall
+accept the `--class` flag. The flag shall
+filter the table to a single class.
 
 **REQ-OPT-STA-004** The subcommand shall accept
 the `--reset` flag. The flag shall clear the
@@ -218,15 +223,17 @@ shall be readable by the developer with `cat` and
 summary by default. The summary shall include the
 total call count, the total cost, the override
 count, the average pass rate, and the average
-cost per tier.
+cost per class.
 
 ## 6. Non-Functional Requirements
 
 **REQ-OPT-NFR-001** The module shall run on Go
 1.23.
 
-**REQ-OPT-NFR-002** The module shall have 100
-percent coverage for the public functions.
+**REQ-OPT-NFR-002** The module shall have
+100 percent behavioural coverage of the
+public functions. Line coverage is tracked
+as a guideline, not a gate.
 
 **REQ-OPT-NFR-003** The router decision shall
 have a maximum latency of 5 milliseconds.
@@ -243,17 +250,17 @@ following items from
 `github.com/<org>/aios/internal/optimizer`.
 
 - `Router`
-- `TieredModelRegistry`
+- `ClassBasedModelRegistry`
 - `CostQualityTable`
 - `Fingerprint`
 - `RoutingDecision`
 - `Override`
-- `Tier`
+- `Class`
 - `NewFingerprint`
 
 ## 8. Data Requirements
 
-**REQ-OPT-DAT-001** The `Tier` schema shall
+**REQ-OPT-DAT-001** The `Class` schema shall
 include the fields below.
 
 - `name` (string)
@@ -266,10 +273,10 @@ include the fields below.
 shall be a SHA-256 hash encoded as a lowercase
 hex string of 64 characters.
 
-**REQ-OPT-DAT-003** The `RoutingDecision` schema
-shall include the fields below.
+**REQ-OPT-DAT-003** The `RoutingDecision`
+schema shall include the fields below.
 
-- `tier` (string)
+- `class` (string)
 - `model_id` (string)
 - `reason` (string)
 - `source` (string: override, table, default,
@@ -277,8 +284,8 @@ shall include the fields below.
 
 **REQ-OPT-DAT-004** The cost/quality table
 schema shall be a JSON object. The keys are
-`fingerprint:tier` pairs. The values are the
-`CostQualityRow` objects.
+`fingerprint:class` pairs. The values are
+the `CostQualityRow` objects.
 
 **REQ-OPT-DAT-005** The `CostQualityRow` schema
 shall include the fields below.
@@ -289,19 +296,19 @@ shall include the fields below.
 - `first_seen` (string, ISO 8601)
 - `last_seen` (string, ISO 8601)
 
-**REQ-OPT-DAT-006** The default `var/optimizer.yaml`
-shall list the tiers. The file shall be loaded on
-`aios init`.
+**REQ-OPT-DAT-006** The default
+`var/optimizer.yaml` shall list the classes.
+The file shall be loaded on `aios init`.
 
 ## 9. Error Handling
 
 **REQ-OPT-ERR-001** The router shall return
-`ErrBudgetExhausted` when no tier fits the
+`ErrBudgetExhausted` when no class fits the
 remaining budget.
 
 **REQ-OPT-ERR-002** The router shall return
-`ErrUnknownTier` when the override is not a
-known tier.
+`ErrUnknownClass` when the override is not a
+known class.
 
 **REQ-OPT-ERR-003** The cost/quality table shall
 return `ErrTableCorrupt` when the file fails to
@@ -310,21 +317,26 @@ parse.
 ## 10. Acceptance Criteria
 
 1. Every REQ in this document has a test case.
-2. The test suite has a 100 percent pass rate.
-3. The test suite has 100 percent coverage for
-   the public functions.
-4. The router is a pure function of its inputs.
+2. The behavioural test suite has a 100
+   percent pass rate.
+3. The test suite has 100 percent behavioural
+   coverage of the public functions. Line
+   coverage is tracked as a guideline, not a
+   gate.
+4. The router is a pure function of its
+   inputs.
 5. The fingerprint is a pure function of the
-   (prompt shape, tool set, role, context length
-   bucket) tuple.
+   (prompt shape, tool set, role, context
+   length bucket) tuple.
 6. The cost/quality table is a JSON file. The
    file is readable with `cat` and `jq`.
-7. The override flag works. `--tier=strong`
+7. The override flag works. `--class=strong`
    always returns strong.
 8. The `--optimizer=off` flag always returns
    strong.
 9. The `--budget` flag caps the cost.
 10. The router never asks the model to grade
     itself.
-11. The `aios stats` CLI prints the table and the
+11. The `aios stats` CLI prints the table and
+    the summary.
     summary.

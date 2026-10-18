@@ -35,7 +35,7 @@ The module has one screen: the benchmark report.
   BENCHMARK REPORT
 ================================================================
   Dataset:    wedge (12 tasks)
-  Tier:       strong (claude-sonnet-4-5)
+  Class:       strong (claude-sonnet-4-5)
   Duration:   312.4s
   Cost:       $1.234
 ================================================================
@@ -54,11 +54,11 @@ The module has one screen: the benchmark report.
 ================================================================
 ```
 
-### 6.2 Two-Tier Report
+### 6.2 Two-Class Report
 
 ```
 ================================================================
-  TWO-TIER REPORT
+  TWO-CLASS REPORT
 ================================================================
   Metric        | Strong    | Weak      | Delta
   --------------|-----------|-----------|--------

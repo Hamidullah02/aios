@@ -40,7 +40,7 @@ shall return the matching paths.
 glob.
 
 **REQ-SRH-GLB-004** The tool shall respect the
-`.aiosignore` file from aios-memory.
+`.aiosignore` file from aios-core.
 
 **REQ-SRH-GLB-005** The tool shall respect the
 workspace root. The tool shall not return paths

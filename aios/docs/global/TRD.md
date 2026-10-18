@@ -273,22 +273,44 @@ described in this section.
 
 The system has exactly four sources of
 non-determinism. Every other part of the system
-is deterministic by construction. The four sources
-are listed below.
+is deterministic by construction. The four
+sources are listed below. Each source is named,
+each source has a measured bound, each source
+is recorded in the audit log.
 
 - The model output. The model is a stochastic
   sampler. The non-determinism is bounded by
-  `temperature=0`. The call fingerprint and the
-  cost/quality table handle the residual variance.
-- The wall clock. The clock is non-deterministic
-  for ordering and for timeouts. The clock is
-  injected through a typed interface. The audit
-  log records every clock read.
-- The network. The network is non-deterministic
-  for latency and for failure. The retry policy
-  and the policy gateway handle the variance.
-- The operator. The operator is non-deterministic
-  for approvals. The auto-allow rules and the
+  best-effort `temperature=0` (when the
+  provider supports it; absence is recorded
+  in the call metadata, not silently
+  treated as zero), by the call fingerprint,
+  and by the recorded model output for
+  every call. The recorded output is the
+  source of truth for replay. The residual
+  variance is measured by the bench, not
+  eliminated by the system.
+- The wall clock. The clock is non-
+  deterministic for ordering and for
+  timestamps. The clock is injected through
+  a typed interface. The injected clock is
+  used in decision paths (plan dispatch,
+  approval timestamps, audit row
+  timestamps). The wall clock is used in
+  deadline paths (per-tool timeouts, daily
+  cost cap, per-run budget, approval
+  expiry). The split is explicit.
+- The network. The network is non-
+  deterministic for latency and for failure.
+  The retry policy and the policy gateway
+  handle the variance. The egress proxy
+  records every outbound call.
+- The operator. The operator is non-
+  deterministic for approvals. The auto-
+  allow rules, the one-use / hash-bound /
+  expiring approval contract, and the kill
+  switch handle the variance. The approval
+  row records the channel and the
+  principal.
   approval templates handle the variance.
 
 ### 8.2 Content-Addressed Values
@@ -311,11 +333,15 @@ listed below.
 
 ### 8.3 The Clock Interface
 
-The clock is a typed interface. The interface is
-listed below.
+The clock is a typed interface. The interface
+is listed below. The interface is used in
+**decision paths**: plan dispatch, approval
+timestamps, audit row timestamps, and the
+memory timeline.
 
 ```go
-// Clock returns the current time.
+// Clock returns the current time for
+// decision paths.
 type Clock interface {
     Now() time.Time
 }
@@ -331,10 +357,22 @@ type fixedClock struct{ t time.Time }
 func (f fixedClock) Now() time.Time { return f.t }
 ```
 
-Every module that reads the clock accepts a
-`Clock` argument. The default constructor
-wires in `wallClock`. The test constructor wires
-in `fixedClock` with a fixed timestamp.
+Every module that reads the clock for a
+decision path accepts a `Clock` argument. The
+default constructor wires in `wallClock`. The
+test constructor wires in `fixedClock` with a
+fixed timestamp.
+
+The wall clock is **also** used directly, but
+only in **deadline paths**: per-tool timeouts,
+the daily cost cap, the per-run budget, and
+approval expiry. The deadline paths do not
+need a fixed clock; they need a real deadline.
+The split is enforced by the lint rule
+`aios/no-wall-clock-in-decision-paths` and by
+the audit row's `clock_source` field, which
+records whether the timestamp came from the
+injected clock or the wall clock.
 
 ### 8.4 The Random Interface
 
@@ -357,22 +395,120 @@ seed.
 
 ### 8.5 The Replay Engine
 
-The replay engine re-executes a plan from a
-checkpoint. The replay engine is a function that
-takes a checkpoint id and a model adapter. The
-function returns the new audit log.
+The replay engine re-executes a recorded
+session using the **recorded model outputs**.
+The replay engine does **not** re-call the
+model. The replay engine is a function that
+takes a session id, the recorded model
+outputs, the recorded plan, the recorded
+policy, the recorded pin set, and the pinned
+sandbox image. The function returns the
+audit log.
 
-The replay engine is a pure function. The
-function is deterministic for every input that
-does not involve the model. The function
-re-executes the plan in the same order. The
-function produces the same audit log entries
-for the same tool calls.
+The replay engine is a pure function of its
+inputs. Two replays of the same session on
+the same pinned image return the same audit
+log. The replay engine is the unit of
+reproducibility for the system around the
+model.
 
-The replay engine is the unit of determinism.
 The user can replay any run by passing the
-checkpoint id. The user can diff two runs by
-passing two checkpoint ids.
+session id. The user can diff two runs by
+passing two session ids. The diff works on
+the audit log, the recorded model outputs,
+and the tool results.
+
+The replay engine is **not** a unit of
+determinism for the model. Live re-
+execution of a run with fresh model calls
+is not part of the replay contract. The
+variance is measured by the bench and
+exposed through `aios bench regression`.
+
+### 8.6 The Content-Addressed Memory
+
+The agent's context is not a buffer of the most
+recent messages. The agent's context is a query
+against a content-addressed memory. The memory
+is what makes aios honest about what it knows.
+The memory is the moat.
+
+The memory has three layers.
+
+- **Raw layer** — the unindexed content-addressed
+  storage. Every artifact is here. The file
+  name is the content hash. Nothing is deleted.
+- **Indexed layer** — a typed view of the raw
+  layer. Artifacts are categorized as tasks,
+  files, decisions, observations, tool results,
+  and model outputs. The index is a JSON
+  object.
+- **Compacted layer** — a lossy view of the
+  indexed layer, regenerated on demand. The
+  compaction is a pure function of the indexed
+  layer, the budget, and the pin set. The
+  compacted view is what the orchestrator puts
+  in the prompt.
+
+The memory has three scopes.
+
+- **Session scope** — in-memory only. Dies
+  when the session ends.
+- **Project scope** — persisted at
+  `var/memory/project/`. `git`-trackable.
+  Persists across sessions in the same project.
+- **User scope** — persisted at
+  `~/.aios/memory/`. Encrypted at rest.
+  Persists across projects.
+
+The retrieval algorithm is a pure function. The
+algorithm runs a query against the indexed
+layer. The algorithm ranks the matching
+artifacts by the following priority.
+
+1. Pinned artifacts. Always include.
+2. Artifacts from the current task. Always
+   include.
+3. Artifacts matching the current role's
+   default context. Include if budget allows.
+4. Artifacts from sibling tasks in the current
+   plan. Include if budget allows.
+5. Artifacts from past sessions matching the
+   query. Include if budget allows.
+
+The pin set is content addressed. The pin set
+id is the SHA-256 of the pin set payload. The
+pin set is honored. Pinned artifacts are
+always in the compacted view regardless of
+the budget.
+
+The memory is on the critical path of every
+model call. The orchestrator queries the
+memory before every turn. The orchestrator
+compacts the result to fit the context budget.
+The orchestrator sends the compacted view to
+the model.
+
+The memory is observable. The developer can
+inspect any artifact by content hash. The
+developer can diff two sessions. The developer
+can prune noise. The developer can pin
+important artifacts across all compacted
+views. The `aios memory` CLI is a developer
+tool. The output is grep-friendly JSON.
+
+The memory is editable. The developer can
+`aios memory pin <hash>` and
+`aios memory unpin <hash>`. The developer can
+`aios memory prune <hash>`. The developer can
+`aios memory gc` to compact the raw layer.
+
+The memory is the unit of long-session
+determinism. The same plan, on the same input,
+through the same orchestrator, against the
+same indexed layer, with the same pin set,
+returns the same compacted view. The memory
+is what makes aios reproducible across hosts.
 
 ## 9. Shared Data Structures
 

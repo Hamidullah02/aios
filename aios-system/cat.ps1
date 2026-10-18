@@ -1,0 +1,1 @@
+Get-Content 'E:\sadi\projects\aiagent\aios-system\internal\core\schemas\taskplan.go' | Select-String -Pattern 'func validateTaskSpecs|func validateOptionalStringList' -Context 0,5 | ForEach-Object { $_.ToString() }

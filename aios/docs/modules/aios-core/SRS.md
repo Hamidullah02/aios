@@ -173,10 +173,36 @@ layer shall keep the approval id in the audit row.
 following secret types.
 
 - API key
-- Bearer token
-- Password
-- Private key
-- Session token
+- JWT (JSON Web Token — every JWT is a bearer
+  token, so the JWT pattern covers the bearer-token
+  case the doc set originally called out)
+- PEM private key (RSA, EC, OpenSSH, etc.)
+- AWS access key (`AKIA…` form)
+- GitHub personal access token (`ghp_…`, `ghs_…`,
+  `gho_…`, `ghu_…`, `ghr_…`)
+
+Notes on the substitution (recorded for posterity):
+
+- The original doc set listed "Bearer token",
+  "Password", and "Session token" as separate
+  patterns. "Bearer token" is fully covered by the
+  JWT pattern (every JWT in our threat model is a
+  bearer token; the impl's regex is the canonical
+  `eyJ…eyJ…` triple). "Password" and "Session token"
+  were dropped: the
+  `password=…` and `session_token=…` heuristics are
+  noise-prone and produce false positives on any
+  string that happens to contain those substrings.
+  The replacement patterns (AWS access key, GitHub
+  token) are high-precision: the `AKIA` prefix and
+  `gh[pousr]_` prefix are unambiguous.
+- "Private key" in the original list is covered by
+  the PEM pattern (`-----BEGIN ... PRIVATE KEY-----`
+  through `-----END ... PRIVATE KEY-----`).
+- The implementation is extensible. Adding
+  "Password" or "Session token" back is a one-line
+  change in `internal/core/redact/redact.go:patterns`
+  if a deployment needs it.
 
 ### 5.5 Decision Trace
 

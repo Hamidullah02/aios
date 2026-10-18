@@ -45,16 +45,17 @@ The route flow runs as follows.
    fingerprint, the override, and the budget.
 2. The router checks the override.
 3. When the override is `off`, the router returns
-   the strong tier.
-4. When the override is `strong`, `medium`, or
-   `weak`, the router returns the override tier.
+   the strong class.
+4. When the override is `strong`, `mid`, or
+   `cheap`, the router returns the override
+   class.
 5. The router looks up the fingerprint in the
    table.
-6. When the fingerprint is in the table for two
-   or more tiers, the router returns the tier
-   with the highest score.
-7. When the fingerprint is not in the table, the
-   router uses the default rule.
+6. When the fingerprint is in the table for
+   two or more classes, the router returns
+   the class with the highest score.
+7. When the fingerprint is not in the table,
+   the router uses the default rule.
 8. The router enforces the budget.
 9. The router returns the decision.
 
@@ -63,7 +64,7 @@ The route flow runs as follows.
 The record flow runs as follows.
 
 1. The caller calls `table.Record` with the
-   fingerprint, the tier, the cost, and the
+   fingerprint, the class, the cost, and the
    verify result.
 2. The table updates the in-memory row.
 3. The table writes the file atomically.
@@ -98,12 +99,12 @@ The budget exhausted flow runs as follows.
 2. The router returns `ErrBudgetExhausted`.
 3. The caller stops the run.
 
-### 7.2 Unknown Tier
+### 7.2 Unknown Class
 
-The unknown tier flow runs as follows.
+The unknown class flow runs as follows.
 
-1. The override is not a known tier.
-2. The router returns `ErrUnknownTier`.
+1. The override is not a known class.
+2. The router returns `ErrUnknownClass`.
 3. The caller reports the error.
 
 ### 7.3 Table Corrupt

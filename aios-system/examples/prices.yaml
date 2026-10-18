@@ -1,0 +1,24 @@
+# aios-models price table
+#
+# Per the aios-models SRS §8 REQ-MOD-DAT-001. The keys are
+# model ids; the values are USD per 1000 tokens. The cost
+# formula is:
+#
+#   cost = (input_tokens / 1000) * input_per_1k
+#        + (output_tokens / 1000) * output_per_1k
+#
+# Override at the call site via PriceTable.Override. The default
+# file path is var/prices.yaml (per the aios-models TRD §11).
+prices:
+  gpt-4o:
+    input_per_1k: 0.005
+    output_per_1k: 0.015
+  gpt-4o-mini:
+    input_per_1k: 0.00015
+    output_per_1k: 0.0006
+  claude-sonnet-4-5:
+    input_per_1k: 0.003
+    output_per_1k: 0.015
+  claude-haiku-4-5:
+    input_per_1k: 0.0008
+    output_per_1k: 0.004

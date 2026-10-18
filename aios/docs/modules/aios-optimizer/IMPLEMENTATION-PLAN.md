@@ -40,12 +40,13 @@ aios-models, and aios-verify.
 
 The deliverable is the project skeleton.
 
-### Phase 2: Tiered Model Registry
+### Phase 2: Class-Based Model Registry
 
 1. Create the file
   `internal/optimizer/registry.go`.
 2. Create the file `tests/registry_test.go`.
-3. Implement the `TieredModelRegistry` type.
+3. Implement the
+  `ClassBasedModelRegistry` type.
 4. Implement the YAML loader.
 5. Write the test cases.
 
@@ -91,7 +92,7 @@ The deliverable is the router with tests.
 2. Create the file `tests/cli_test.go`.
 3. Implement the `aios stats` subcommand.
 4. Implement the `--fingerprint` flag.
-5. Implement the `--tier` flag.
+5. Implement the `--class` flag.
 6. Implement the `--reset` flag.
 7. Write the test cases.
 
@@ -103,7 +104,7 @@ The deliverable is the CLI with tests.
   `internal/optimizer/integration.go`.
 2. Create the file `tests/integration_test.go`.
 3. Implement the integration with aios-runtime.
-4. Implement the `--tier` flag on `aios run`.
+4. Implement the `--class` flag on `aios run`.
 5. Implement the `--optimizer` flag on `aios
    run`.
 6. Implement the `--budget` flag on `aios run`.
@@ -154,9 +155,9 @@ The deliverable is a green test suite.
 
 The test cases include the following items.
 
-- The registry loads the tiers.
-- The registry returns `ErrUnknownTier` for an
-  unknown tier.
+- The registry loads the classes.
+- The registry returns `ErrUnknownClass`
+  for an unknown class.
 - The fingerprint is a pure function. Two calls
   with the same inputs return the same
   fingerprint.
@@ -172,14 +173,14 @@ The test cases include the following items.
 - The table records the pass count and the
   total cost.
 - The table resets to empty.
-- The router returns the override tier when the
-  override is set.
-- The router returns the strong tier when the
-  override is `off`.
-- The router returns the highest-score tier
+- The router returns the override class
+  when the override is set.
+- The router returns the strong class when
+  the override is `off`.
+- The router returns the highest-score class
   when the fingerprint is in the table.
-- The router returns the weakest tier when the
-  fingerprint is not in the table.
+- The router returns the cheapest class when
+  the fingerprint is not in the table.
 - The router returns `ErrBudgetExhausted` when
   the budget is exhausted.
 - The `aios stats` subcommand prints the table.
@@ -224,7 +225,7 @@ The test cases include the following items.
 | Phase | Duration | Dependency |
 | --- | --- | --- |
 | Phase 1: Project Skeleton | 1 day | None |
-| Phase 2: Tiered Model Registry | 1 day | Phase 1 |
+| Phase 2: Class-Based Model Registry | 1 day | Phase 1 |
 | Phase 3: Call Fingerprint | 2 days | Phase 1 |
 | Phase 4: Cost/Quality Table | 2 days | Phase 1 |
 | Phase 5: Router | 2 days | Phase 2, Phase 3, Phase 4 |

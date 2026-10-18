@@ -43,11 +43,11 @@ The module has two screens.
   Table id:  sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
   Updated:   2026-10-17T10:34:23Z
 ================================================================
-  TIER  | CALLS | PASS  | RATE  | COST/1K  | AVG COST
+  CLASS | CALLS | PASS  | RATE  | COST/1K  | AVG COST
   -------|-------|-------|-------|----------|----------
   strong |    12 |    12 | 1.000 | $0.0240  | $0.0240
-  medium |    23 |    22 | 0.957 | $0.0030  | $0.0030
-  weak   |   187 |   176 | 0.941 | $0.0003  | $0.0003
+  mid    |    23 |    22 | 0.957 | $0.0030  | $0.0030
+  cheap  |   187 |   176 | 0.941 | $0.0003  | $0.0003
   -------|-------|-------|-------|----------|----------
   TOTAL  |   222 |   210 | 0.946 |          | $0.342
 ================================================================
@@ -69,14 +69,14 @@ The module has two screens.
   Role:     coder
   Context:  1024
 ================================================================
-  TIER  | CALLS | PASS  | RATE  | AVG COST | LAST SEEN
+  CLASS | CALLS | PASS  | RATE  | AVG COST | LAST SEEN
   -------|-------|-------|-------|----------|-----------
   strong |     2 |     2 | 1.000 | $0.0180  | 2026-10-17T10:30:00Z
-  medium |     5 |     5 | 1.000 | $0.0028  | 2026-10-17T10:31:00Z
-  weak   |    19 |    19 | 1.000 | $0.0003  | 2026-10-17T10:34:00Z
+  mid    |     5 |     5 | 1.000 | $0.0028  | 2026-10-17T10:31:00Z
+  cheap  |    19 |    19 | 1.000 | $0.0003  | 2026-10-17T10:34:00Z
 ================================================================
   Default rule: cost_first
-  Last decision: weak (source: table, score: 3333)
+  Last decision: cheap (source: table, score: 3333)
 ================================================================
 ```
 
@@ -91,12 +91,12 @@ The module has two screens.
 ================================================================
   DECISIONS
   -------
-  Tier   | Source     | Count | Cost   | Pass rate
+  Class  | Source     | Count | Cost   | Pass rate
   -------|------------|-------|--------|----------
   strong | override   |     2 | $0.048 | 1.000
-  medium | table      |     3 | $0.009 | 1.000
-  weak   | table      |    41 | $0.012 | 0.976
-  weak   | default    |    12 | $0.018 | 0.917
+  mid    | table      |     3 | $0.009 | 1.000
+  cheap  | table      |    41 | $0.012 | 0.976
+  cheap  | default    |    12 | $0.018 | 0.917
   -------|------------|-------|--------|----------
   TOTAL  |            |    58 | $0.087 | 0.966
 ================================================================
@@ -112,14 +112,14 @@ The module has two screens.
 - The operator types `aios stats
   --fingerprint=<hash>` to see a single
   fingerprint.
-- The operator types `aios stats --tier=weak` to
-  filter by tier.
+- The operator types `aios stats --class=cheap` to
+  filter by class.
 - The operator types `aios stats --reset` to
   clear the table.
 - The operator types `cat var/optimizer.json |
   jq` to inspect the raw table.
 - The operator types `aios run "<goal>"
-  --tier=strong` to override the router.
+  --class=strong` to override the router.
 - The operator types `aios run "<goal>"
   --optimizer=off` to disable the router.
 - The operator types `aios run "<goal>"

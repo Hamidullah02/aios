@@ -49,13 +49,13 @@ The run flow runs as follows.
 7. The runner returns the list of metrics.
 8. The CLI prints the metrics.
 
-### 6.2 Two-Tier Flow
+### 6.2 Two-Class Flow
 
-The two-tier flow runs as follows.
+The two-class flow runs as follows.
 
-1. The CLI calls `two_tier.run`.
-2. The runner runs the strong orchestrator.
-3. The runner runs the weak orchestrator.
+1. The CLI calls `two_class.run`.
+2. The runner runs the strong-class orchestrator.
+3. The runner runs the cheap-class orchestrator.
 4. The runner computes the delta.
 5. The runner returns the delta.
 6. The CLI prints the delta.

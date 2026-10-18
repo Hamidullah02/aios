@@ -15,7 +15,7 @@ document.
 
 - The wedge dataset.
 - The benchmark runner.
-- The two-tier runner.
+- The two-class runner.
 - The metrics calculator.
 
 The aios-benchmark module is not in scope for this
@@ -34,15 +34,15 @@ document.
 | Term | Definition |
 | --- | --- |
 | Wedge | A set of tasks that exercise a specific capability. |
-| Strong tier | A larger model with higher capability. |
-| Weak tier | A smaller model with lower capability. |
+| Strong class | A larger model with higher capability. |
+| Cheap class | A smaller model with lower capability. |
 | Loop check | A check that the agent did not loop. |
 | Head-to-head | A comparison between two systems on the same task. |
 
 
 ## 5. Determinism
 
-The whole point of aios is to make complex coding and large systems deterministic. The determinism stance of this module is **Highly deterministic**.
+The whole point of aios is to make complex coding and large systems **reproducible and auditable**, not to make them 'deterministic' in the sense that a model-mediated system cannot be. The determinism stance of this module is **Highly deterministic** for the benchmark harness itself; the model is one input, never the foundation.
 
 The benchmark harness is a pure function of the dataset and the orchestrator.
 
@@ -63,10 +63,10 @@ developer passes the dataset to the runner. The
 runner runs the orchestrator on the dataset. The
 runner returns the metrics.
 
-A developer wants to run the two-tier comparison.
+A developer wants to run the two-class comparison.
 The developer passes the dataset to the runner. The
-runner runs the orchestrator with the strong tier
-and the weak tier. The runner returns the comparison.
+runner runs the orchestrator with the strong class
+and the cheap class. The runner returns the comparison.
 
 A developer wants to measure the loop check. The
 developer passes the dataset to the runner. The
@@ -80,7 +80,7 @@ functions.
 
 - The wedge dataset.
 - The benchmark runner.
-- The two-tier runner.
+- The two-class runner.
 - The metrics calculator.
 
 ## 9. Non-Functional Requirements Summary
@@ -88,16 +88,15 @@ functions.
 - The module runs on Go 1.23.
 - The module depends on aios-core, aios-runtime, and
   aios-models.
-- The module has 100 percent test coverage for the
-  public functions.
+- The module has 100 percent behavioural coverage of the public functions. Line coverage is tracked as a guideline, not a gate.
 
 ## 10. Success Criteria
 
 - The runner runs the wedge dataset.
 - The runner produces the metrics.
-- The two-tier runner produces the comparison.
+- The two-class runner produces the comparison.
 - The loop check produces the metrics.
-- The test suite has a 100 percent pass rate.
+- The behavioural test suite has a 100 percent pass rate.
 
 ## 11. Out of Scope
 

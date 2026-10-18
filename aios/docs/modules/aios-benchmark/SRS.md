@@ -64,15 +64,15 @@ orchestrator on every task in the dataset.
 duration, the cost, the success, and the loop count
 for every task.
 
-### 5.3 Two-Tier Runner
+### 5.3 Two-Class Runner
 
 **REQ-BCH-2TR-001** The module shall provide the
-`TwoTierRunner` class. The type shall accept two
-orchestrators with different model tiers.
+`TwoClassRunner` class. The type shall accept two
+orchestrators with different model classes.
 
 **REQ-BCH-2TR-002** The runner shall run the
-dataset with the strong tier. The runner shall run
-the dataset with the weak tier.
+dataset with the strong class. The runner shall run
+the dataset with the cheap class.
 
 **REQ-BCH-2TR-003** The runner shall compute the
 delta in the metrics. The runner shall return the
@@ -108,7 +108,7 @@ following items from `aios.benchmark`.
 
 - `WedgeDataset`
 - `BenchmarkRunner`
-- `TwoTierRunner`
+- `TwoClassRunner`
 - `LoopChecker`
 - `Metrics`
 
@@ -142,5 +142,5 @@ timeout.
 3. The test suite has 100 percent coverage for the
    public functions.
 4. The runner runs the wedge dataset.
-5. The two-tier runner produces the comparison.
+5. The two-class runner produces the comparison.
 6. The loop checker produces the metrics.

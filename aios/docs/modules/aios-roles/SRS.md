@@ -50,7 +50,7 @@ roles from a YAML file. The default path is
 ### 5.2 Role Configuration
 
 **REQ-ROL-CFG-001** A role shall have a `name`, a
-`system_prompt`, a `tools` list, a `model_tier`,
+`system_prompt`, a `tools` list, a `model_class`,
 and an `output_format`.
 
 **REQ-ROL-CFG-002** The `output_format` shall be
@@ -92,22 +92,22 @@ fallback is set.
 following default roles.
 
 - `planner` — the planner role. The role uses the
-  strong tier. The role uses the plan output
+  strong class. The role uses the plan output
   format.
 - `coder` — the coder role. The role uses the
-  strong tier. The role uses the code output
+  strong class. The role uses the code output
   format.
 - `editor` — the editor role. The role uses the
-  medium tier. The role uses the code output
+  mid class. The role uses the code output
   format.
 - `explorer` — the explorer role. The role uses
-  the weak tier. The role uses the text output
+  the cheap class. The role uses the text output
   format. The role uses the read-only tools.
 - `reviewer` — the reviewer role. The role uses
-  the strong tier. The role uses the text output
+  the strong class. The role uses the text output
   format.
 - `verifier` — the verifier role. The role uses
-  the strong tier. The role uses the json output
+  the strong class. The role uses the json output
   format.
 
 ## 6. Non-Functional Requirements
@@ -140,7 +140,7 @@ the fields below.
 - `name` (string)
 - `system_prompt` (string)
 - `tools` (list of string)
-- `model_tier` (string: strong, medium, weak)
+- `model_class` (string: cheap, mid, strong)
 - `output_format` (string: text, json, code)
 - `temperature` (float, default 0)
 - `max_tokens` (int, optional)

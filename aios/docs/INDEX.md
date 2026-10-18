@@ -241,9 +241,13 @@ commit, branch, log, and merge.
 
 ### aios-memory
 
-The in-session memory. The module provides a
-key-value store with namespacing, TTL, and an
-oplog.
+The content-addressed memory and context manager.
+The module is the moat: bigger, better, and more
+honest context than the competition. Three scopes
+(session, project, user), three layers (raw,
+indexed, compacted), typed query language,
+pinnable artifacts, observable compaction, and a
+`aios memory` CLI that is grep-friendly JSON.
 
 | File | Description |
 | --- | --- |

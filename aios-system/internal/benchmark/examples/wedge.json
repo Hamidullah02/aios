@@ -1,0 +1,54 @@
+{
+  "tasks": [
+    {
+      "id": "fr-hello",
+      "wedge": "file_read",
+      "goal": "Read hello.txt and return its content.",
+      "expected_result": { "contains": "hello" },
+      "timeout_seconds": 30
+    },
+    {
+      "id": "fw-hello",
+      "wedge": "file_write",
+      "goal": "Write 'hello, world' to greeting.txt.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "fs-go",
+      "wedge": "file_search",
+      "goal": "Find all .go files in the workspace.",
+      "expected_result": { "min_count": 1 },
+      "timeout_seconds": 30
+    },
+    {
+      "id": "sh-version",
+      "wedge": "shell_run",
+      "goal": "Run `go version` and report the output.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "ap-write",
+      "wedge": "approval",
+      "goal": "Write to a file under /etc/ (requires approval).",
+      "timeout_seconds": 60
+    },
+    {
+      "id": "au-clarify",
+      "wedge": "ask_user",
+      "goal": "Ask the user which package manager they use.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": "rs-paused",
+      "wedge": "resume",
+      "goal": "Resume a paused task that was waiting for input.",
+      "timeout_seconds": 60
+    },
+    {
+      "id": "cn-running",
+      "wedge": "cancel",
+      "goal": "Cancel a long-running shell task.",
+      "timeout_seconds": 30
+    }
+  ]
+}

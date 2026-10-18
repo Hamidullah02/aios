@@ -62,7 +62,7 @@ reason.
 
 **REQ-VRF-RNT-002** The tool shall accept a
 `test_command` argument. The default is the command
-in `AGENTS.md`.
+in `AGENTS.md` from aios-core.
 
 **REQ-VRF-RNT-003** The tool shall run the test
 command through the os/exec wrapper. The tool

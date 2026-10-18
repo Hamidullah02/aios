@@ -1,0 +1,34 @@
+# Example aios egress policy.
+#
+# Loaded with: egress.LoadFile("./examples/egress.yaml")
+# The path is configurable; the default is "./var/egress.yaml".
+# A missing file produces an empty allow list (deny by default).
+
+allow:
+  # Direct match.
+  - api.openai.com
+  - api.anthropic.com
+
+  # Glob match. A leading "*." matches any subdomain.
+  - "*.npmjs.org"
+  - "*.golang.org"
+
+deny:
+  # Deny takes precedence over allow. Anything matching this
+  # pattern is refused with a 403 even if a wildcard above would
+  # have allowed it.
+  - "*.internal.corp"
+  - "metadata.google.internal"
+
+headers:
+  # Strip headers the sandbox may have set; the upstream should
+  # not see them.
+  remove:
+    - X-Internal-Token
+    - Cookie
+
+  # Inject headers so the upstream can identify the request as
+  # coming from the proxy.
+  add:
+    X-Aios-Request: "true"
+    User-Agent: "aios-egress/0.1"

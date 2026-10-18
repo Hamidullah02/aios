@@ -1,0 +1,27 @@
+# aios-models capability registry
+#
+# Per the aios-models SRS §8 REQ-MOD-DAT-002. The keys are model
+# ids. The provider tells the router which adapter to dispatch
+# to. context_window is in tokens. The supports_* flags are
+# booleans.
+capabilities:
+  gpt-4o:
+    provider: openai
+    context_window: 128000
+    supports_tools: true
+    supports_vision: true
+  gpt-4o-mini:
+    provider: openai
+    context_window: 128000
+    supports_tools: true
+    supports_vision: true
+  claude-sonnet-4-5:
+    provider: anthropic
+    context_window: 200000
+    supports_tools: true
+    supports_vision: true
+  claude-haiku-4-5:
+    provider: anthropic
+    context_window: 200000
+    supports_tools: true
+    supports_vision: false

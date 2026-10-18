@@ -32,8 +32,8 @@ module. The module is a Go package.
 
 The aios-optimizer module has four components.
 
-- `internal/optimizer/registry` — the tiered
-  model registry.
+- `internal/optimizer/registry` — the
+  class-based model registry.
 - `internal/optimizer/fingerprint` — the call
   fingerprint.
 - `internal/optimizer/table` — the cost/quality
@@ -51,14 +51,15 @@ the verify result type.
 
 ## 6. Components
 
-### 6.1 Tiered Model Registry
+### 6.1 Class-Based Model Registry
 
-The registry holds the list of tiers. The registry
-loads the tiers from `var/optimizer.yaml`. The
-registry validates the tier definitions. The
-registry provides the `Get` method. The method
-returns the tier for a name. The method returns
-`ErrUnknownTier` when the name is not in the
+The registry holds the list of classes. The
+registry loads the classes from
+`var/optimizer.yaml`. The registry validates
+the class definitions. The registry provides
+the `Get` method. The method returns the
+class for a name. The method returns
+`ErrUnknownClass` when the name is not in the
 registry.
 
 ### 6.2 Call Fingerprint
@@ -100,7 +101,7 @@ temporary file. The temporary file is renamed to
 the final path.
 
 The in-memory table is a map. The key is a
-`fingerprint:tier` string. The value is a
+`fingerprint:class` string. The value is a
 `CostQualityRow` struct.
 
 The pass rate is computed lazily. The pass rate is
@@ -116,24 +117,24 @@ registry, and the table. The router returns a
 
 The router algorithm is listed below.
 
-1. When the override is `off`, return the strong
-   tier with `source=optimizer_off`.
-2. When the override is `strong`, `medium`, or
-   `weak`, return the override tier with
+1. When the override is `off`, return the
+   strong class with `source=optimizer_off`.
+2. When the override is `strong`, `mid`, or
+   `cheap`, return the override class with
    `source=override`.
 3. Look up the fingerprint in the table. When
    the fingerprint is in the table for two or
-   more tiers, return the tier with the highest
-   pass rate per unit cost. The cost is the
-   empirical cost, not the list price.
-4. When the fingerprint is not in the table, use
-   the default rule. The default rule is
+   more classes, return the class with the
+   highest pass rate per unit cost. The cost
+   is the empirical cost, not the list price.
+4. When the fingerprint is not in the table,
+   use the default rule. The default rule is
    `cost_first`. The default rule returns the
-   weakest tier.
+   cheapest class.
 5. Enforce the budget. When the budget is
-   exhausted, return the weakest tier that fits
-   the remaining budget. When no tier fits,
-   return `ErrBudgetExhausted`.
+   exhausted, return the cheapest class that
+   fits the remaining budget. When no class
+   fits, return `ErrBudgetExhausted`.
 
 The router does not call the model. The router
 does not call the verify layer. The router is a
@@ -141,11 +142,11 @@ pure function of its inputs.
 
 ## 7. Data Structures
 
-### 7.1 Tier
+### 7.1 Class
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `Name` | string | yes | The name of the tier. |
+| `Name` | string | yes | The name of the class. |
 | `ModelID` | string | yes | The model id. |
 | `CostPer1kInput` | float64 | yes | The list cost per 1000 input tokens. |
 | `CostPer1kOutput` | float64 | yes | The list cost per 1000 output tokens. |
@@ -161,7 +162,7 @@ SHA-256 hash encoded as a lowercase hex string of
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `Tier` | string | yes | The selected tier. |
+| `Class` | string | yes | The selected class. |
 | `ModelID` | string | yes | The selected model id. |
 | `Reason` | string | yes | The human-readable reason. |
 | `Source` | string | yes | The source of the decision. |
@@ -181,9 +182,9 @@ SHA-256 hash encoded as a lowercase hex string of
 ### 8.1 Router
 
 ```go
-// Router picks the model tier for a call.
+// Router picks the model class for a call.
 type Router struct {
-    registry *TieredModelRegistry
+    registry *ClassBasedModelRegistry
     table    *CostQualityTable
 }
 
@@ -231,27 +232,27 @@ func NewFingerprint(
 
 ```go
 // CostQualityTable is the empirical pass rate
-// and cost per (fingerprint, tier) pair.
+// and cost per (fingerprint, class) pair.
 type CostQualityTable struct {
     path  string
     rows  map[string]CostQualityRow
 }
 
-// Get returns the row for the (fingerprint, tier)
-// pair. The function returns (nil, false) when
-// the pair is not in the table.
+// Get returns the row for the (fingerprint,
+// class) pair. The function returns (nil,
+// false) when the pair is not in the table.
 func (t *CostQualityTable) Get(
     fp Fingerprint,
-    tier string,
+    class string,
 ) (CostQualityRow, bool)
 
-// Record updates the table for the (fingerprint,
-// tier) pair. The function is not safe for
-// concurrent use. The function writes the table
-// to the file atomically.
+// Record updates the table for the
+// (fingerprint, class) pair. The function is
+// not safe for concurrent use. The function
+// writes the table to the file atomically.
 func (t *CostQualityTable) Record(
     fp Fingerprint,
-    tier string,
+    class string,
     costUSD float64,
     verifyPassed bool,
 ) error
@@ -279,25 +280,25 @@ The fingerprint algorithm works as follows.
 
 The routing algorithm works as follows.
 
-1. When the override is `off`, return the strong
-   tier with `source=optimizer_off`.
-2. When the override is `strong`, `medium`, or
-   `weak`, return the override tier with
+1. When the override is `off`, return the
+   strong class with `source=optimizer_off`.
+2. When the override is `strong`, `mid`, or
+   `cheap`, return the override class with
    `source=override`.
 3. Look up the fingerprint in the table. When
    the fingerprint is in the table for two or
-   more tiers, compute the score for each tier.
-   The score is the pass rate divided by the
-   average empirical cost. Return the tier with
-   the highest score.
-4. When the fingerprint is not in the table, use
-   the default rule. The default rule is
+   more classes, compute the score for each
+   class. The score is the pass rate divided
+   by the average empirical cost. Return the
+   class with the highest score.
+4. When the fingerprint is not in the table,
+   use the default rule. The default rule is
    `cost_first`. The default rule returns the
-   weakest tier.
+   cheapest class.
 5. Enforce the budget. When the budget is
-   exhausted, return the weakest tier that fits
-   the remaining budget. When no tier fits,
-   return `ErrBudgetExhausted`.
+   exhausted, return the cheapest class that
+   fits the remaining budget. When no class
+   fits, return `ErrBudgetExhausted`.
 
 ### 9.3 Atomic Write Algorithm
 
@@ -346,7 +347,7 @@ default registry is loaded from
 | Risk | Impact | Probability | Mitigation |
 | --- | --- | --- | --- |
 | The cost/quality table is stale. | High | Medium | The table is updated on every call. The table has a `last_seen` timestamp. The developer can clear the table with `aios stats --reset`. |
-| The fingerprint is too coarse. | Medium | Medium | The fingerprint includes the prompt shape, the tool set, the role, and the context length bucket. The developer can override per call with `--tier=strong` or `--tier=weak`. |
+| The fingerprint is too coarse. | Medium | Medium | The fingerprint includes the prompt shape, the tool set, the role, and the context length bucket. The developer can override per call with `--class=strong` or `--class=cheap`. |
 | The fingerprint is too fine. | Low | High | The table grows without bound. The table is pruned by the developer with `aios stats --reset`. |
 | The pass rate is misleading. | High | Low | The pass rate is the empirical verify result, not the model self-evaluation. The developer can inspect the table with `aios stats`. |
 | The budget is exceeded. | High | Low | The router enforces the budget. The router returns `ErrBudgetExhausted` when the budget is exhausted. |

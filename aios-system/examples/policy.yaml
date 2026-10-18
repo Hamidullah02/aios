@@ -1,0 +1,57 @@
+# Example aios policy file.
+#
+# Loaded with: policy.Load("./examples/policy.yaml")
+# The path is configurable; the default is "./var/policy.yaml".
+
+rules:
+  # Allow read-only tools.
+  - id: allow-read
+    match:
+      tool: read_file
+    action: allow
+    reason: read-only tool
+
+  # Allow all tools that start with "list_".
+  - id: allow-list
+    match:
+      tool_glob: "list_*"
+    action: allow
+    reason: read-only tool family
+
+  # Require approval for write tools.
+  - id: ask-write
+    match:
+      tool_glob: "write_*"
+    action: ask
+    approval:
+      action: write
+      resource: "{path}"
+      reason: "Write to {path} on branch {arg.branch}"
+      bound_to:
+        task: "{task}"
+        tool: "{tool}"
+        actor: "{actor}"
+
+  # Deny writes to system paths.
+  - id: deny-system
+    match:
+      path_prefix: "/etc/"
+    action: deny
+    reason: writes to system paths are forbidden
+
+  # Deny writes to secrets.
+  - id: deny-secrets
+    match:
+      path_glob: "**/.env"
+    action: deny
+    reason: writes to env files are forbidden
+
+  # Require approval for tier-3 actions.
+  - id: ask-tier3
+    match:
+      tier: 3
+    action: ask
+    approval:
+      action: tier3
+      resource: "{path}"
+      reason: "Tier-3 action by {actor} on {path}"

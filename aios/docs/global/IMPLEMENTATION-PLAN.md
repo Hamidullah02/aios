@@ -54,12 +54,19 @@ includes the following modules.
 - `github.com/<org>/aios/internal/models`
 - `github.com/<org>/aios/internal/approvals`
 - `github.com/<org>/aios/internal/persist`
+- `github.com/<org>/aios/internal/memory`
 
 The release establishes the typed schemas, the
 audit log, the state machine, the redaction layer,
 the policy gateway, the sandbox runner, the egress
 proxy, the model adapter layer, the approval
-service, and the session persistence layer.
+service, the session persistence layer, and the
+content-addressed memory. The memory is the moat:
+it is on the critical path of every model call,
+it persists across sessions, and it gives the
+orchestrator a queryable, pinnable, observable
+view of every artifact the agent has ever
+touched.
 
 ### 5.2 Release 1.0: Capability
 
@@ -71,7 +78,6 @@ includes the following modules.
 - `github.com/<org>/aios/internal/search`
 - `github.com/<org>/aios/internal/edit`
 - `github.com/<org>/aios/internal/git`
-- `github.com/<org>/aios/internal/memory`
 - `github.com/<org>/aios/internal/watch`
 - `github.com/<org>/aios/internal/fanout`
 - `github.com/<org>/aios/internal/retry`
@@ -84,8 +90,8 @@ includes the following modules.
 
 The release establishes the tool bus, the built-in
 tools, the search and read tools, the edit tools,
-the git integration, the in-session memory, the
-file watcher, the parallel sub-agent runner, the
+the git integration, the file watcher, the
+parallel sub-agent runner, the
 retry policy, the verify layer, the role registry,
 the image tool, the ask-user tool, the report
 generator, and the model router with cost
@@ -269,6 +275,21 @@ must pass.
   the same input, the same plan, the same
   approvals, the same model, the same
   temperature, and a fixed clock.
+- Every memory artifact is identified by content
+  hash. Two artifacts with the same content have
+  the same hash.
+- The memory retrieval is a pure function. Two
+  retrievals with the same query, the same index,
+  the same pin set, and the same budget return
+  the same compacted view.
+- The memory compaction is a pure function. Two
+  compactions with the same input return the same
+  compacted view.
+- The memory pin set is content-addressed. Two
+  pin sets with the same content have the same
+  id.
+- The memory replay produces the same compacted
+  views on a second host.
 
 ## 7. Merge Sequence
 
@@ -287,11 +308,11 @@ The merge sequence is listed below.
 6. `github.com/<org>/aios/internal/optimizer` — the model router.
 7. `github.com/<org>/aios/internal/approvals` — the approval service.
 8. `github.com/<org>/aios/internal/persist` — the session persistence.
-9. `github.com/<org>/aios/internal/tools` — the tool bus.
-10. `github.com/<org>/aios/internal/search` — the search tools.
-11. `github.com/<org>/aios/internal/edit` — the edit tools.
-12. `github.com/<org>/aios/internal/git` — the git integration.
-13. `github.com/<org>/aios/internal/memory` — the in-session memory.
+9. `github.com/<org>/aios/internal/memory` — the content-addressed memory.
+10. `github.com/<org>/aios/internal/tools` — the tool bus.
+11. `github.com/<org>/aios/internal/search` — the search tools.
+12. `github.com/<org>/aios/internal/edit` — the edit tools.
+13. `github.com/<org>/aios/internal/git` — the git integration.
 14. `github.com/<org>/aios/internal/watch` — the file watcher.
 15. `github.com/<org>/aios/internal/fanout` — the parallel runner.
 16. `github.com/<org>/aios/internal/retry` — the retry policy.
@@ -362,8 +383,8 @@ release. The plan has the following items.
 
 | Phase | Release | Duration | Modules |
 | --- | --- | --- | --- |
-| Phase 1: Foundation | 0.9 | 30 days | 8 modules |
-| Phase 2: Capability | 1.0 | 45 days | 14 modules |
+| Phase 1: Foundation | 0.9 | 35 days | 9 modules (core, policy, sandbox, egress, models, optimizer, approvals, persist, memory) |
+| Phase 2: Capability | 1.0 | 45 days | 13 modules |
 | Phase 3: Agentic | 1.1 | 30 days | 3 modules |
 | Phase 4: Operator | 1.2 | 15 days | 1 module |
 

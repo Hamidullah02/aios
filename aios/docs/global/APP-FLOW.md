@@ -90,13 +90,70 @@ The report flow runs as follows.
 
 ### 5.5 Replay Flow
 
-The replay flow runs as follows.
+The replay flow runs as follows. The replay
+re-executes a recorded session using the
+**recorded model outputs**. The replay does
+**not** re-call the model.
 
 1. The operator runs `aios replay <session_id>`.
-2. The CLI loads the session from
+2. The CLI loads the session, the recorded
+   plan, the recorded policy, the recorded
+   pin set, and the recorded model outputs
+   from
    `github.com/<org>/aios/internal/persist`.
-3. The CLI re-executes the plan.
-4. The CLI writes the new report.
+3. The CLI loads the pinned sandbox image.
+4. The CLI invokes the replay engine with
+   these inputs. The replay engine produces
+   the same audit log as the original run.
+5. The CLI writes the new report. The report
+   shows the original run and the replay side
+   by side, with the diff.
+
+### 5.6 Memory Flow
+
+The memory flow runs as follows.
+
+1. The orchestrator prepares the prompt for a
+   turn.
+2. The orchestrator calls
+   `retrieval.Retrieve(query, currentTaskID)`.
+3. The retrieval queries the indexed layer in
+   `github.com/<org>/aios/internal/memory`.
+4. The retrieval ranks the matching artifacts
+   by the priority: pinned, current task,
+   current role context, sibling tasks, past
+   sessions.
+5. The retrieval enforces the budget. The
+   retrieval returns a `CompactedView`.
+6. The orchestrator adds the `CompactedView`
+   to the prompt.
+7. The orchestrator sends the prompt to the
+   model.
+
+The developer can inspect the memory at any
+point through the `aios memory` CLI. The CLI
+prints the current compacted view, the indexed
+layer, the pin set, and the raw layer
+statistics.
+
+### 5.7 Diff Flow
+
+The diff flow runs as follows.
+
+1. The developer runs
+   `aios memory diff <session_a> <session_b>`.
+2. The CLI loads the indexed layers for both
+   sessions.
+3. The CLI computes the diff. The diff is the
+   set of artifacts that are in one session
+   but not the other.
+4. The CLI prints the diff as JSON. The
+   developer pipes to `jq` and filters.
+
+The diff is the dev's lever for understanding
+why two sessions produced different outcomes.
+The diff is content-addressed. The diff is
+reproducible.
 
 ## 6. System Flows
 
@@ -248,19 +305,26 @@ below.
 
 ### 8.1 Replay Flow
 
-The replay flow runs as follows.
+The replay flow runs as follows. The replay
+re-executes a recorded session using the
+**recorded model outputs**. The replay does
+**not** re-call the model. The replay is the
+unit of reproducibility for the system
+around the model.
 
 1. The operator runs `aios replay <session_id>`.
-2. The CLI loads the session from
-   `internal/persist`.
-3. The CLI loads the checkpoint from
-   `internal/persist`.
-4. The CLI passes the checkpoint to the replay
+2. The CLI loads the session, the recorded
+   plan, the recorded policy, the recorded
+   pin set, and the recorded model outputs
+   from `internal/persist`.
+3. The CLI loads the pinned sandbox image.
+4. The CLI passes the inputs to the replay
    engine.
-5. The replay engine re-executes the plan from
-   the checkpoint.
-6. The replay engine produces a new audit log.
-7. The CLI shows the new audit log.
+5. The replay engine produces a new audit
+   log. The new audit log is equivalent to
+   the original audit log.
+6. The CLI shows the new audit log side by
+   side with the original.
 
 ### 8.2 Diff Flow
 

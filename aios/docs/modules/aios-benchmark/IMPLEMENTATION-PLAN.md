@@ -60,14 +60,14 @@ The deliverable is the dataset with tests.
 
 The deliverable is the runner with tests.
 
-### Phase 4: Two-Tier Runner
+### Phase 4: Two-Class Runner
 
-1. Create the file `internal/benchmark/two_tier.py`.
-2. Create the file `tests/test_two_tier.py`.
-3. Implement the `TwoTierRunner` class.
+1. Create the file `internal/benchmark/two_class.py`.
+2. Create the file `tests/test_two_class.py`.
+3. Implement the `TwoClassRunner` class.
 4. Write the test cases.
 
-The deliverable is the two-tier runner with tests.
+The deliverable is the two-class runner with tests.
 
 ### Phase 5: Loop Checker
 
@@ -114,8 +114,8 @@ The deliverable is a green test suite.
   `internal/benchmark/dataset.py`.
 - `tests/test_runner.py` covers
   `internal/benchmark/runner.py`.
-- `tests/test_two_tier.py` covers
-  `internal/benchmark/two_tier.py`.
+- `tests/test_two_class.py` covers
+  `internal/benchmark/two_class.py`.
 - `tests/test_loop.py` covers
   `internal/benchmark/loop.py`.
 - `tests/test_cli.py` covers
@@ -128,7 +128,7 @@ The test cases include the following items.
 - The dataset loads the tasks.
 - The runner runs the dataset.
 - The runner records the metrics.
-- The two-tier runner computes the delta.
+- The two-class runner computes the delta.
 - The loop checker records the loop count.
 - The CLI prints the report.
 - The CLI returns the exit code.
@@ -167,7 +167,7 @@ The test cases include the following items.
 | Phase 1: Project Skeleton | 1 day | nil |
 | Phase 2: Dataset | 2 days | Phase 1 |
 | Phase 3: Runner | 2 days | Phase 2 |
-| Phase 4: Two-Tier Runner | 1 day | Phase 3 |
+| Phase 4: Two-Class Runner | 1 day | Phase 3 |
 | Phase 5: Loop Checker | 1 day | Phase 3 |
 | Phase 6: CLI | 1 day | Phase 3, Phase 4, Phase 5 |
 | Phase 7: Quality Gates | 1 day | All phases |

@@ -38,7 +38,7 @@ roles:
       sequence of tasks. Use the tools to inspect
       the codebase first.
     tools: [read_file, search_files, run_shell]
-    model_tier: strong
+    model_class: strong
     output_format: json
     temperature: 0
     max_tokens: 8000
@@ -53,7 +53,7 @@ roles:
       - write_file
       - edit
       - run_shell
-    model_tier: strong
+    model_class: strong
     output_format: code
     temperature: 0
 
@@ -62,7 +62,7 @@ roles:
       You are an editor. Apply small edits to the
       code. Use the edit tool.
     tools: [read_file, edit]
-    model_tier: medium
+    model_class: medium
     output_format: code
     temperature: 0
 
@@ -71,7 +71,7 @@ roles:
       You are an explorer. Find the relevant files
       and read them. Do not edit files.
     tools: [read_file, search_files, grep]
-    model_tier: weak
+    model_class: weak
     output_format: text
     temperature: 0
 
@@ -80,7 +80,7 @@ roles:
       You are a reviewer. Check the code for
       bugs. Suggest fixes.
     tools: [read_file, search_files, grep]
-    model_tier: strong
+    model_class: strong
     output_format: text
     temperature: 0
 
@@ -90,7 +90,7 @@ roles:
       the goal. Return pass, fail, or
       inconclusive.
     tools: [read_file, search_files, run_tests]
-    model_tier: strong
+    model_class: strong
     output_format: json
     temperature: 0
 ```
