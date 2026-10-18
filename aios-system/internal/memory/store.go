@@ -28,6 +28,10 @@ type Store struct {
 	// enc is the optional encryptor for the user scope.
 	// The field is nil for unencrypted stores.
 	enc Encryptor
+	// mem is the in-memory payload map. The field is
+	// non-nil only for the in-memory store used by
+	// the session scope.
+	mem map[string][]byte
 }
 
 // StoreConfig controls Store construction.
@@ -49,14 +53,25 @@ type StoreConfig struct {
 // The store is content-addressed on disk: the file
 // name is the content hash, the file content is the
 // payload.
+//
+// When cfg.Path is empty the store is in-memory
+// only. The in-memory store is used by the session
+// scope; the data is dropped on Close.
 func NewStore(cfg StoreConfig) (*Store, error) {
 	if cfg.Path == "" {
-		return nil, &MemoryError{Op: "init", Reason: "path is required"}
+		return newInMemoryStore(), nil
 	}
 	if err := os.MkdirAll(cfg.Path, 0o755); err != nil {
 		return nil, &MemoryError{Op: "init", Reason: err.Error()}
 	}
 	return &Store{path: cfg.Path, enc: cfg.Encryptor}, nil
+}
+
+// newInMemoryStore constructs a Store whose payloads
+// are kept in a map instead of on disk. The function
+// is the session-scope constructor.
+func newInMemoryStore() *Store {
+	return &Store{path: "", enc: nil, mem: make(map[string][]byte)}
 }
 
 // Put stores the content and returns the content
@@ -74,6 +89,20 @@ func (s *Store) Put(content []byte) (string, error) {
 	hash := HashBytes(content)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.mem != nil {
+		payload := content
+		if s.enc != nil {
+			cipher, err := s.enc.Encrypt(content)
+			if err != nil {
+				return "", &MemoryError{Op: "put", Reason: err.Error()}
+			}
+			payload = cipher
+		}
+		cp := make([]byte, len(payload))
+		copy(cp, payload)
+		s.mem[hash] = cp
+		return hash, nil
+	}
 	if err := s.writePayload(hash, content); err != nil {
 		return "", err
 	}
@@ -91,6 +120,22 @@ func (s *Store) Get(hash string) ([]byte, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.mem != nil {
+		raw, ok := s.mem[hash]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		if s.enc == nil {
+			out := make([]byte, len(raw))
+			copy(out, raw)
+			return out, nil
+		}
+		plain, err := s.enc.Decrypt(raw)
+		if err != nil {
+			return nil, &MemoryError{Op: "get", Reason: err.Error()}
+		}
+		return plain, nil
+	}
 	if !s.knownHash(hash) {
 		return nil, ErrNotFound
 	}
@@ -116,10 +161,14 @@ func (s *Store) Get(hash string) ([]byte, error) {
 // not load the payload from disk.
 func (s *Store) Has(hash string) (bool, error) {
 	if hash == "" {
-		return false, &MemoryError{Op: "has", Reason: "hash is required"}
+		return false, nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.mem != nil {
+		_, ok := s.mem[hash]
+		return ok, nil
+	}
 	if !s.knownHash(hash) {
 		return false, nil
 	}
@@ -139,6 +188,13 @@ func (s *Store) Has(hash string) (bool, error) {
 func (s *Store) Size() (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.mem != nil {
+		var total int64
+		for _, p := range s.mem {
+			total += int64(len(p))
+		}
+		return total, nil
+	}
 	var total int64
 	err := filepath.WalkDir(s.path, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -166,6 +222,9 @@ func (s *Store) Size() (int64, error) {
 func (s *Store) Count() (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.mem != nil {
+		return len(s.mem), nil
+	}
 	entries, err := os.ReadDir(s.path)
 	if err != nil {
 		return 0, &MemoryError{Op: "count", Reason: err.Error()}
@@ -190,6 +249,14 @@ func (s *Store) Count() (int, error) {
 func (s *Store) List() ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.mem != nil {
+		hashes := make([]string, 0, len(s.mem))
+		for h := range s.mem {
+			hashes = append(hashes, h)
+		}
+		sort.Strings(hashes)
+		return hashes, nil
+	}
 	entries, err := os.ReadDir(s.path)
 	if err != nil {
 		return nil, &MemoryError{Op: "list", Reason: err.Error()}
@@ -220,6 +287,10 @@ func (s *Store) List() ([]string, error) {
 func (s *Store) Compact() (CompactReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.mem != nil {
+		before := len(s.mem)
+		return CompactReport{Before: before, After: before}, nil
+	}
 	before, err := s.countLocked()
 	if err != nil {
 		return CompactReport{}, err

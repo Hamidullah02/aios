@@ -229,6 +229,27 @@ func TestWrite_NoIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestTimestamp_UsesRecordedAt(t *testing.T) {
+	// When the row has a non-zero RecordedAt, the writer
+	// should use it instead of the clock. This test confirms
+	// the round-trip preserves the timestamp.
+	fixed := time.Date(2023, 6, 15, 12, 0, 0, 0, time.UTC)
+	log := newLog(t)
+	row := &Row{
+		TaskID:     "t",
+		Kind:       "k",
+		Actor:      "op",
+		Payload:    map[string]any{"a": 1},
+		RecordedAt: fixed,
+	}
+	if _, err := log.Write(row); err != nil {
+		t.Fatal(err)
+	}
+	if !row.RecordedAt.Equal(fixed) {
+		t.Fatalf("RecordedAt = %v, want %v", row.RecordedAt, fixed)
+	}
+}
+
 func TestOpen_EmptyPath(t *testing.T) {
 	if _, err := Open(Config{}); err == nil {
 		t.Fatal("expected error for empty path")
@@ -239,6 +260,29 @@ func TestOpen_NonExistentDir(t *testing.T) {
 	// Use a path inside a non-existent directory.
 	if _, err := Open(Config{Path: "/no/such/dir/db.sqlite"}); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestOpen_FilePath(t *testing.T) {
+	// Real file path (not :memory:), exercises the
+	// WAL-mode branch.
+	tmp := t.TempDir()
+	dbPath := tmp + "/audit.db"
+	log, err := Open(Config{Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = log.Close()
+}
+
+func TestClose_Idempotent(t *testing.T) {
+	// Closing twice should be a no-op the second time.
+	log, _ := Open(Config{Path: ":memory:"})
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatalf("second close should be a no-op: %v", err)
 	}
 }
 

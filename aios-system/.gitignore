@@ -1,0 +1,37 @@
+# Coverage profile artifacts (regenerable from `go test -coverprofile`)
+*.out
+*.cover
+*.coverprofile
+
+# Test artifacts (test run output, not source)
+var/checkpoints/
+internal/**/var/
+
+# One-off audit scripts (created for a specific doc-audit pass;
+# safe to delete; not part of the build / test workflow).
+# These names are NOT yet in git, so ignoring them prevents
+# them from being added on a future commit.
+where.ps1
+untracked.ps1
+untracked-all.ps1
+ls-files.ps1
+cat-gi.ps1
+git-state.ps1
+git-state2.ps1
+diff-stat.ps1
+diff-readme.ps1
+diff-mem.ps1
+list-docs.ps1
+list-docs2.ps1
+list-docs3.ps1
+list-modules.ps1
+inv.ps1
+req-count.ps1
+show-req.ps1
+show-req2.ps1
+show-req3.ps1
+show-req4.ps1
+check-ignored.ps1
+check-ignore.ps1
+untrack.ps1
+ls-ps1.ps1
