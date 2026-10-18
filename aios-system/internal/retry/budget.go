@@ -126,6 +126,9 @@ func (b *RetryBudget) Used(taskID, tool string, class ErrorClass) int {
 // while the lock is already held. Each scope (global,
 // tool, class) has its own count; the result is the
 // minimum of (limit - used) across the three scopes.
+//
+// The result is always >= 0 because Allow only charges the
+// budget when the previous result was strictly positive.
 func (b *RetryBudget) RemainingLocked(taskID, tool string, class ErrorClass) int {
 	min := b.Max - b.usedFor(taskID, "global")
 	if v := b.limitForTool(tool) - b.usedFor(taskID, "tool:"+tool); v < min {
@@ -133,9 +136,6 @@ func (b *RetryBudget) RemainingLocked(taskID, tool string, class ErrorClass) int
 	}
 	if v := b.limitForClass(class) - b.usedFor(taskID, "class:"+string(class)); v < min {
 		min = v
-	}
-	if min < 0 {
-		min = 0
 	}
 	return min
 }
