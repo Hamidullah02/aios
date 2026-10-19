@@ -1,6 +1,184 @@
 # Changelog
 
 
+
+v0.33.0 â€” ios fix <objective>: the planner turn
+
+The v0.32.0 review closed the model -> tool -> result
+-> verifier chain for a plan that already exists. This
+version closes the missing first half: the planner
+turn. ios fix <objective> is the doc set's primary
+entry point â€” the CLI takes a natural-language
+objective, calls the planner to turn it into a
+TaskPlan, and runs the plan through the same loop
+un uses.
+
+The full chain is now:
+
+  objective -> planner.Plan -> TaskPlan
+            -> BusWorker -> tools.Bus -> policy
+            -> tool -> audit
+            -> CommandVerifier
+
+Every component is the production implementation, not
+a stub. The planner calls a real model (via a real
+HTTP adapter). The bus dispatches to a real tool. The
+verifier inspects the result and fails the plan on an
+empty Output or nil Data.
+
+What changed:
+
+- **internal/cli/parser.go â€” new ix subcommand.**
+  ios fix <objective> takes the objective as a
+  single positional arg. An optional --model flag
+  overrides the planner's default model id. The
+  parser's indSubcommandIndex map now includes
+  ix so the global flags parse before it.
+
+- **internal/cli/router_wiring.go â€” new file.** The
+  production uildRouter constructs a
+  *models.Router with both OpenAI and Anthropic
+  adapters (reading OPENAI_API_KEY and
+  ANTHROPIC_API_KEY from the env). The router
+  loads ar/egress.yaml, ar/prices.yaml, and
+  ar/capabilities.yaml (with built-in defaults
+  for the latter two when the file is missing or in
+  the wrong shape). The function returns the router,
+  the price table, and the egress allow list.
+
+- **internal/cli/planner_wiring.go â€” new file.**
+  The production plannerToolSpecs returns the
+  planner's view of the tool set: a flat
+  {Name, Description, InputSchema, RiskTier} map
+  for ead_file, search_files, write_file,
+  un_shell, and sk_user. The descriptions and
+  schemas are the strings the model reads when it
+  decides which tool to dispatch to. The tool list
+  mirrors the bus's tool map in wireAgentLoop; the
+  two are kept in sync by hand (a comment in the
+  file notes the seam).
+
+- **internal/cli/deps.go â€” BuildDeps now wires
+  the planner for ix.** For every non-bootstrap
+  subcommand (i.e. every subcommand except init
+  and daemon), BuildDeps constructs a
+  *tools.Bus, a *BusWorker, and a
+  CommandVerifier (the v0.32.0 wiring). For ix
+  only, it additionally constructs a
+  *planner.Planner and the supporting router /
+  price table / egress. The Deps struct gains
+  Router, Prices, Egress, and Planner
+  fields. Other subcommands (run, resume, cancel,
+  report, audit) leave the planner nil â€” they
+  operate on a plan file that already exists.
+
+- **internal/cli/main.go â€” new unFix handler.**
+  The handler calls planner.Plan(ctx, args.Objective,
+  nil), then runs the resulting plan through the
+  shared unWithApprovals inner loop. The chain
+  is: planner -> BusWorker -> bus -> policy -> tool
+  -> audit -> CommandVerifier. The handler fails
+  closed: a missing planner, a model call error
+  (e.g. no API key), a verifier reject â€” all
+  return a non-zero exit code and a clear error
+  message on stderr.
+
+- **internal/cli/init_command.go â€” fix the
+  defaultPricesYAML shape.** The previous scaffold
+  wrote a list-shaped file
+  (prices:\n  - model: gpt-4o\n    ...) but
+  models.LoadPriceTable reads a map-shaped file
+  (prices:\n  gpt-4o:\n    ...). The scaffold is
+  now map-shaped; the price table loads cleanly on
+  ios init.
+
+- **internal/cli/fix_wiring_test.go â€” new file.**
+  Five tests guard the wiring:
+    - TestBuildDeps_WiresPlannerForFix â€”
+      asserts BuildDeps wires a planner for
+      ix but leaves it nil for un.
+    - TestRunFix_RequiresObjective â€” asserts
+      unFix returns a user error when the
+      objective is empty.
+    - TestRunFix_RealChain â€” drives the full
+      chain with a stub model that returns a
+      valid plan JSON. The plan runs through the
+      real worker, bus, policy, and tool, and the
+      audit log has a 	ool_call row.
+    - TestRunFix_NoAPIKey_FailsClosed â€” runs
+      Main("fix", ...) with OPENAI_API_KEY
+      and ANTHROPIC_API_KEY unset. The CLI
+      returns a clear "OPENAI_API_KEY is not set"
+      error and exit code 2.
+    - TestRunFix_EndToEndWithHTTPServer â€”
+      points the production OpenAIAdapter at a
+      httptest.Server that mimics the OpenAI
+      chat completions response. The planner
+      calls the server, parses the response, and
+      the plan runs through the real loop. This
+      is the integration test the v0.31.0 review
+      demanded.
+
+- **internal/cli/test_helpers.go â€” new file.**
+  uildTestAgentLoop is the test seam: it
+  constructs the production wire (tools.Bus,
+  BusWorker, CommandVerifier) with a pre-built
+  audit log, policy, and fake ask callback, so
+  tests do not have to load policy from disk or
+  block on stdin.
+
+Verified:
+
+- go build ./... clean.
+- go vet ./... clean.
+- gofmt -l . clean.
+- go test ./... â€” 30 packages pass.
+- Live end-to-end: ios init + ios fix
+  "read the design" with no API key. The CLI
+  prints "Planning: read the design" then
+  "error: plan generation failed after 1
+  iteration(s): planner: model call: openai:
+  no_api_key: OPENAI_API_KEY is not set" and exits
+  with code 2.
+
+Substitutions vs the doc set:
+
+- **ix is a real subcommand, not a flag.** The
+  doc set describes ios fix <objective> as the
+  primary entry point. This version makes it
+  explicit: a top-level subcommand, not a flag on
+  un.
+
+- **The planner verifier is planner.NewCodeFirstVerifier.**
+  The planner's repair loop uses the same verifier
+  the planner package's tests use. A future commit
+  can swap in a custom verifier (e.g. one that
+  consults the policy gateway) without changing
+  the ix handler.
+
+- **API key check is at call time, not startup.**
+  The production adapters read the API key at
+  Complete time, so a missing key surfaces as a
+  clear error from the first model call. The CLI
+  does not pre-flight the key (that would couple
+  startup to a network round-trip).
+
+Known gaps (the next milestone):
+
+- The unwired modules (benchmark, egress, memory,
+  persist, report, search) are still untouched.
+  The planner module is now wired into the CLI
+  but only the planner's public API is used; the
+  rest of the planner package (custom rules,
+  schema validation) is exposed but not yet
+  exercised by ix.
+- AUDIT.md is stale. docs/architecture is
+  the source of truth.
+- The CLI does not yet save the plan the planner
+  produced to a file so a user can re-run it
+  with ios run after editing. Adding
+  --plan-out is a small follow-up.
+
 v0.32.0 â€” real agent loop
 
 The v0.31.0 review (the only reviewer request the

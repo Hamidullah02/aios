@@ -108,10 +108,16 @@ headers:
 
 const defaultPricesYAML = `# aios default price table. REQ-MOD-PRC-001.
 # Add your models here. The key is the model id; values are
-# USD per 1k tokens.
+# USD per 1k tokens. The map-shaped format is what
+# models.LoadPriceTable reads; a list-shaped file is
+# silently treated as empty (v0.33.0 fix: the previous
+# scaffold wrote a list the loader could not read).
 prices:
-  - model: gpt-4o
+  gpt-4o:
     input_per_1k: 0.005
+    output_per_1k: 0.015
+  claude-sonnet-4-5:
+    input_per_1k: 0.003
     output_per_1k: 0.015
 `
 

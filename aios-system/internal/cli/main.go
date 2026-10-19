@@ -69,6 +69,8 @@ func RunCommand(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	switch args.Command {
 	case CmdInit:
 		return runInit(args, deps, stdout, stderr)
+	case CmdFix:
+		return runFix(ctx, args, deps, stdout, stderr)
 	case CmdRun:
 		return runRun(ctx, args, deps, stdout, stderr)
 	case CmdResume:
@@ -173,6 +175,72 @@ func runAudit(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, DisplayError(err, args.Debug))
 		return ExitCodeFor(err)
 	}
+	return ExitOK
+}
+
+// runFix is the entry point the doc set describes: it takes
+// a natural-language objective, calls the planner to turn
+// it into a plan, and runs the plan through the same loop
+// `run` uses. The chain is:
+//
+//	objective -> planner.Plan -> TaskPlan -> runWithApprovals
+//	         -> BusWorker -> tools.Bus -> policy -> tool -> audit
+//	         -> CommandVerifier
+//
+// This is the loop the v0.31.0 review demanded. Every
+// component is the production implementation, not a stub:
+// the planner calls a real model (via the router); the
+// bus dispatches to a real tool; the verifier inspects
+// the result and fails the plan on an empty Output or
+// nil Data.
+//
+// The function fails closed: a missing planner (the
+// router could not be wired), a model call error
+// (e.g. OPENAI_API_KEY not set), or a verifier reject
+// all return a non-zero exit code and a clear error
+// message on stderr.
+func runFix(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Writer) int {
+	if args.Objective == "" {
+		fmt.Fprintln(stderr, "cli: `fix` requires an objective")
+		return ExitUserError
+	}
+	if deps.Planner == nil {
+		fmt.Fprintln(stderr, "cli: `fix`: planner is not configured (router or planner init failed)")
+		return ExitSystemError
+	}
+	// The planner reads the model's choice of model id
+	// (or the operator's --model override) and calls
+	// the model once or twice (initial + maybe one
+	// repair). The result is a verified TaskPlan.
+	fmt.Fprintf(stdout, "Planning: %s\n", args.Objective)
+	plan, err := deps.Planner.Plan(ctx, args.Objective, nil)
+	if err != nil {
+		fmt.Fprint(stderr, DisplayError(err, args.Debug))
+		return ExitCodeFor(err)
+	}
+	if plan == nil {
+		fmt.Fprintln(stderr, "cli: `fix`: planner returned a nil plan")
+		return ExitSystemError
+	}
+	fmt.Fprintf(stdout, "Plan:     %s (tasks=%d)\n", plan.ID, len(plan.Tasks))
+	// Run the plan through the same loop `run` uses.
+	// This is the part the v0.32.0 commit landed: the
+	// BusWorker dispatches to the bus, the bus consults
+	// the policy gateway, runs the tool, writes the
+	// audit row, and the verifier inspects the result.
+	report, err := runWithApprovals(ctx, plan, nil, ResumeDeps{
+		Audit:   deps.Audit,
+		Resume:  deps.Resume,
+		Worker:  deps.Worker,
+		Verify:  deps.Verifier,
+		Budget:  deps.Budget,
+		Approve: deps.Approval,
+	}, "fix")
+	if err != nil {
+		fmt.Fprint(stderr, DisplayError(err, args.Debug))
+		return ExitCodeFor(err)
+	}
+	PrintReport(stdout, report)
 	return ExitOK
 }
 

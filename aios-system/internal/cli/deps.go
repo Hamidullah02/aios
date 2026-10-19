@@ -7,6 +7,9 @@ import (
 	"github.com/sadi/aios-system/internal/approvals"
 	"github.com/sadi/aios-system/internal/ask"
 	"github.com/sadi/aios-system/internal/core/audit"
+	"github.com/sadi/aios-system/internal/egress"
+	"github.com/sadi/aios-system/internal/models"
+	"github.com/sadi/aios-system/internal/planner"
 	"github.com/sadi/aios-system/internal/policy"
 	"github.com/sadi/aios-system/internal/runtime"
 	"github.com/sadi/aios-system/internal/sandbox"
@@ -51,6 +54,21 @@ type Deps struct {
 	Budget    runtime.Budget
 	Approval  ApprovalHandler
 	Approvals *approvals.Service
+	// Router, Prices, Egress: wired for the `fix`
+	// subcommand only. The router holds the model
+	// adapters (OpenAI, Anthropic); the price table
+	// computes USD cost; the egress allow list is a
+	// future hook. nil for subcommands that do not
+	// need a model client.
+	Router *models.Router
+	Prices *models.PriceTable
+	Egress *egress.AllowList
+	// Planner: the `fix` subcommand's planner. nil
+	// for subcommands that do not call the planner.
+	// The planner holds the model router internally;
+	// the Router field is also exposed so tests can
+	// stub the model client.
+	Planner *planner.Planner
 }
 
 // Close releases the resources the Deps holds. The
@@ -193,6 +211,19 @@ func BuildDeps(args *Args) (*Deps, error) {
 			_ = deps.Close()
 			return nil, err
 		}
+		// The `fix` subcommand also needs a planner
+		// (it turns the objective into a plan) and a
+		// model router (the planner calls the model).
+		// Other non-bootstrap subcommands (run,
+		// resume, cancel, report, audit) do not call
+		// the planner; they operate on a plan file
+		// that already exists.
+		if args.Command == CmdFix {
+			if err := wirePlanner(deps, args); err != nil {
+				_ = deps.Close()
+				return nil, err
+			}
+		}
 	}
 	return deps, nil
 }
@@ -267,4 +298,58 @@ func fmtPath(p string) string {
 		return "(unset)"
 	}
 	return fmt.Sprintf("%s", p)
+}
+
+// wirePlanner constructs the model router, the egress
+// allow list, the price table, and the planner. The
+// function is split out of BuildDeps because the
+// planner wiring is non-trivial and reading it in
+// isolation is easier than reading it inside the
+// larger BuildDeps body.
+//
+// The function assumes wireAgentLoop has already
+// run: the audit log is open, the policy gateway
+// is loaded, and the resume handler is constructed.
+// The function does not depend on the bus or the
+// worker; the planner is a separate dependency
+// that runs before the loop.
+//
+// The workspace is taken from args.Workspace (or
+// the dirname of args.ConfigPath as a fallback).
+// The router reads the egress, prices, and
+// capabilities files in that workspace.
+func wirePlanner(deps *Deps, args *Args) error {
+	workspace := args.Workspace
+	if workspace == "" {
+		workspace = filepath.Dir(args.ConfigPath)
+	}
+	workspace = ensureWorkspace(workspace)
+	router, prices, allow, err := buildRouter(workspace)
+	if err != nil {
+		return err
+	}
+	deps.Router = router
+	deps.Prices = prices
+	deps.Egress = allow
+	// The planner verifies each candidate plan with the
+	// same CodeFirstVerifier the planner package's
+	// tests use. The verifier is the typed bridge
+	// between the planner (which speaks ToolSpec) and
+	// the bus (which speaks Tool).
+	tools := plannerToolSpecs()
+	verifier := planner.NewCodeFirstVerifier(tools)
+	pl, err := planner.NewPlanner(planner.Config{
+		Router:   router,
+		Tools:    tools,
+		Verifier: verifier,
+	})
+	if err != nil {
+		return &CliError{
+			Kind:  "config",
+			What:  "planner init failed",
+			Cause: err,
+		}
+	}
+	deps.Planner = pl
+	return nil
 }

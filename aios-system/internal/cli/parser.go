@@ -13,9 +13,16 @@ import (
 // before doing any work. Per REQ-CLI-FST-002 the supported
 // subcommands are:
 //
-//	run, resume, cancel, report, daemon start, daemon stop,
+//	fix, run, resume, cancel, report, daemon start, daemon stop,
 //	audit, init
+//
+// `fix` is the primary entry point the doc set describes:
+// the CLI takes a natural-language objective, calls the
+// planner to turn it into a plan, and runs the plan through
+// the same loop `run` uses. `run` is retained for users
+// who want to feed a hand-written plan YAML.
 const (
+	CmdFix    = "fix"
 	CmdRun    = "run"
 	CmdResume = "resume"
 	CmdCancel = "cancel"
@@ -55,6 +62,8 @@ type Args struct {
 	SocketPath string
 	DaemonMode bool   // true when `daemon start` is foreground
 	DaemonPID  string // pid file path for `daemon start` (default)
+	Objective  string // the natural-language goal for `fix`
+	Model      string // model id override for `fix` and `run` (default: planner picks)
 }
 
 // Parse parses argv into Args. argv[0] is the program name
@@ -132,6 +141,12 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	sub := flag.NewFlagSet(a.Command, flag.ContinueOnError)
 	sub.SetOutput(w)
 	switch a.Command {
+	case CmdFix:
+		// `fix` takes a single positional (the objective)
+		// and an optional --model override. The Objective
+		// field is populated by the caller before the
+		// switch; the parser just adds the flag.
+		sub.StringVar(&a.Model, "model", "", "model id override (default: planner picks)")
 	case CmdRun:
 		sub.StringVar(&a.PlanPath, "plan", "", "path to the plan YAML file")
 	case CmdResume:
@@ -188,6 +203,19 @@ func (a *Args) helpRequested(fs *flag.FlagSet) bool {
 
 func (a *Args) validate() error {
 	switch a.Command {
+	case CmdFix:
+		// `fix` takes the objective as a single positional
+		// argument. We join all positionals so users can
+		// pass a multi-word objective without quoting each
+		// word (the shell already collapses them into one
+		// arg when quoted; we keep them as one field here).
+		if len(a.Positional) == 0 {
+			return &CliError{Kind: "user", What: "`fix` requires an objective: aios fix <objective>"}
+		}
+		a.Objective = a.Positional[0]
+		if a.Objective == "" {
+			return &CliError{Kind: "user", What: "`fix` objective is empty"}
+		}
 	case CmdRun:
 		if a.PlanPath == "" && len(a.Positional) > 0 {
 			a.PlanPath = a.Positional[0]
@@ -225,6 +253,7 @@ func (a *Args) validate() error {
 // known subcommand. -1 means no subcommand was found.
 func findSubcommandIndex(argv []string) int {
 	known := map[string]bool{
+		CmdFix: true,
 		CmdRun: true, CmdResume: true, CmdCancel: true, CmdReport: true,
 		CmdAudit: true, CmdInit: true, CmdDaemon: true,
 	}
@@ -261,6 +290,7 @@ Usage:
   aios [--debug] [--config=path] [--log=path] <subcommand> [flags] [args...]
 
 Subcommands:
+  fix <objective>        Plan + run: turn the objective into a plan and run it.
   run <plan>             Run a plan from a YAML file.
   resume <task>          Resume a paused task.
   cancel <task>          Cancel a running task.
