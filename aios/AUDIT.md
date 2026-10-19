@@ -1,5 +1,100 @@
 # Design and product audit
 
+---
+
+## Status update — 2026-Q4
+
+The audit was written in 2026-Q2 as a pre-Phase-2
+sanity check. Since then, the v0.31–v0.35 series
+has shipped (committed to
+github.com/Hamidullah02/aios, main branch). The
+items the audit called out are now in one of three
+states: **closed**, **partially closed**, or
+**still open**. This section maps each item to the
+shipping state and the version that addressed it.
+
+### Closed
+
+* **C1. First run path.** Closed in v0.33.0. The
+  `aios fix <objective>` subcommand is the
+  production entry point: it calls the planner
+  (a real model, not a stub), the planner's
+  CodeFirstVerifier, and runs the resulting
+  TaskPlan through the BusWorker. v0.34.0 added
+  `aios fix --plan-out <path>` so the user can
+  persist the plan and re-run it via
+  `aios run <path>`.
+
+* **C2. "No real model" cost lie.** Closed in
+  v0.32.0. `internal/models` ships a real
+  OpenAI adapter and a real Anthropic adapter.
+  The `Router.Complete` path attaches a USD
+  cost via the `PriceTable` (read from
+  `var/prices.yaml`). Cost is now measured
+  against real provider-reported token counts,
+  not stubbed.
+
+* **C3. Approval service in the request path.**
+  Closed in v0.32.0. The BusWorker converts the
+  bus's "requires approval" error into a
+  `*runtime.WaitingForApproval` (see
+  `internal/cli/bus_worker.go`). The
+  orchestrator catches it via `errors.As` and
+  pauses the plan until the operator grants the
+  approval. The grant flow is the
+  `internal/approvals.Service.Request` /
+  `Grant` / `Deny` triad the audit named.
+
+### Partially closed
+
+* **H1. Four concurrency caps.** The data model
+  is in place: `runtime.Budget` has the four
+  caps the audit named (max_parallel_workers,
+  max_tool_calls_per_minute,
+  max_model_calls_per_minute,
+  max_network_requests_per_minute), and
+  `BudgetMeter` has a parallel-workers
+  semaphore plus a sliding window for the rate
+  caps. The orchestrator remains sequential
+  (REQ-RT-ORC-003: one task at a time), so
+  enforcement is a no-op in the current
+  production path. Wiring the meter into the
+  orchestrator's task loop is a v0.36+ change.
+
+### Still open (in the v0.9 list)
+
+* H2. SchemaValidator and DiffScopeVerifier.
+  Not implemented. The `planner.CodeFirstVerifier`
+  covers the go-test and file-content cases; the
+  schema and diff-scope cases are the next
+  verifier primitives.
+* H3. Audit redaction and the secret flow.
+  Not addressed in the v0.31–v0.35 series.
+* H4. WorkflowSpec runner and ScheduleSpec
+  runner. Schemas are in place; runners are not.
+* H5. False-success warning. Not addressed.
+* H6. §15.5 head-to-head benchmark. Not built.
+  The internal two-class benchmark in
+  `internal/benchmark` is the seed; the
+  competitor adapters are not.
+
+### What this audit did not name (now shipping)
+
+The audit did not predict the v0.34.0
+`--plan-out` flag or the v0.35.0 verify-tool
+wiring (`run_tests`, `self_check` on the bus).
+Those are post-audit additions, addressed in
+their own CHANGELOG entries.
+
+### What to do with this file
+
+This file is now stale. The recommendations
+("proceed after closing C1, C2, C3") are
+satisfied. The remaining H items are tracked
+separately. Do not delete this file; it is the
+historical record. New work is tracked in
+`aios-system/CHANGELOG.md`.
+
 **Date:** 2026-Q2
 **Scope:** DESIGN.md v0.8 (the spec), the aios implementation (493
 tests, all green), the B16 review, and the §1 value proposition.
