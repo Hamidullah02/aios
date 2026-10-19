@@ -43,11 +43,18 @@ func TestMain_EndToEndRun(t *testing.T) {
 	if err := os.WriteFile(planPath, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Policy file: required by fail-closed. Empty rules
+	// list is valid; the smoke test exercises the
+	// passthrough worker which does not consult policy.
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
+		[]byte("rules: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// Audit log path inside the temp dir.
 	auditPath := filepath.Join(dir, "aios.db")
-	// No --config: the smoke test does not exercise policy.
 	args := []string{
 		"aios",
+		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + auditPath,
 		"run", planPath,
 	}
@@ -81,25 +88,17 @@ func TestMain_EndToEndRun(t *testing.T) {
 // through Main.
 func TestMain_EndToEndInit(t *testing.T) {
 	dir := t.TempDir()
-	// init creates ./var/ relative to the CWD. cd into a
-	// temp dir so the scaffolded files don't pollute the
-	// package directory.
-	oldwd, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(oldwd)
-
 	var stdout, stderr bytes.Buffer
 	code := Main([]string{
 		"aios",
+		"--config=" + filepath.Join(dir, "config.yaml"),
 		"init",
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code: %d, stderr:\n%s", code, stderr.String())
 	}
 	for _, name := range []string{"policy.yaml", "egress.yaml", "prices.yaml", "config.yaml"} {
-		path := filepath.Join(dir, "var", name)
+		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("missing %s: %v", name, err)
 		}
@@ -122,6 +121,11 @@ func TestMain_EndToEndResume(t *testing.T) {
 			"    tool: read_file\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Policy file: required by fail-closed.
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
+		[]byte("rules: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// Pre-populate a checkpoint at task index 1 (past the
 	// only task) so the resume run completes with no work.
 	checkpointDir := filepath.Join(dir, "checkpoints")
@@ -139,6 +143,7 @@ func TestMain_EndToEndResume(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Main([]string{
 		"aios",
+		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + filepath.Join(dir, "aios.db"),
 		"resume", "--plan", planPath, "--task", "rsm-1",
 	}, &stdout, &stderr)
@@ -170,10 +175,16 @@ func TestMain_EndToEndReport(t *testing.T) {
 			"    tool: read_file\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Policy file: required by fail-closed.
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
+		[]byte("rules: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	auditPath := filepath.Join(dir, "aios.db")
 	// Run the plan first.
 	code := Main([]string{
 		"aios",
+		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + auditPath,
 		"run", planPath,
 	}, &bytes.Buffer{}, &bytes.Buffer{})
@@ -186,6 +197,7 @@ func TestMain_EndToEndReport(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := Main([]string{
 				"aios",
+				"--config=" + filepath.Join(dir, "config.yaml"),
 				"--log=" + auditPath,
 				"report", "--task", "rpt-1", "--format=" + format,
 			}, &stdout, &stderr)
@@ -200,7 +212,7 @@ func TestMain_EndToEndReport(t *testing.T) {
 // through Main. We pre-populate a checkpoint and verify
 // the CLI deletes it.
 func TestMain_EndToEndCancel(t *testing.T) {
-	_ = t.TempDir()
+	dir := t.TempDir()
 	// Pre-populate a checkpoint under the hard-coded
 	// ./var/checkpoints path so the cancel has something
 	// to delete. The test environment's working
@@ -216,9 +228,14 @@ func TestMain_EndToEndCancel(t *testing.T) {
 		[]byte(`{"task_id":"cancel-1","task_index":0}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Policy file: required by fail-closed.
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
+		[]byte("rules: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var stdout, stderr bytes.Buffer
 	code := Main([]string{
-		"aios", "cancel", id,
+		"aios", "--config=" + filepath.Join(dir, "config.yaml"), "cancel", id,
 	}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code: %d, stderr: %s", code, stderr.String())
@@ -243,15 +260,26 @@ func TestMain_EndToEndAudit(t *testing.T) {
 			"    tool: read_file\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Policy file: required by fail-closed.
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
+		[]byte("rules: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	auditPath := filepath.Join(dir, "aios.db")
 	if code := Main([]string{
-		"aios", "--log=" + auditPath, "run", planPath,
+		"aios",
+		"--config=" + filepath.Join(dir, "config.yaml"),
+		"--log=" + auditPath,
+		"run", planPath,
 	}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("run code: %d", code)
 	}
 	var stdout, stderr bytes.Buffer
 	if code := Main([]string{
-		"aios", "--log=" + auditPath, "audit", "--task", "aud-1",
+		"aios",
+		"--config=" + filepath.Join(dir, "config.yaml"),
+		"--log=" + auditPath,
+		"audit", "--task", "aud-1",
 	}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code: %d, stderr: %s", code, stderr.String())
 	}

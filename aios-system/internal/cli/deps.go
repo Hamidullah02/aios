@@ -10,6 +10,26 @@ import (
 	"github.com/sadi/aios-system/internal/runtime"
 )
 
+// subcommands that bootstrap the workspace. These run
+// before the policy file exists, so BuildDeps must not
+// require a valid policy for them. Every other subcommand
+// fails closed: missing or invalid policy is a hard
+// error and the binary exits 2.
+var bootstrapSubcommands = map[string]bool{
+	CmdInit:   true,
+	CmdDaemon: true,
+}
+
+// requiresPolicy reports whether the subcommand needs a
+// loaded policy gateway. Bootstrap subcommands return
+// false; everything else returns true.
+func requiresPolicy(command string) bool {
+	if bootstrapSubcommands[command] {
+		return false
+	}
+	return true
+}
+
 // Deps is the production dependency graph the CLI uses.
 // Every subcommand reads what it needs from this struct;
 // the production binary calls BuildDeps to construct it.
@@ -73,10 +93,12 @@ func BuildDeps(args *Args) (*Deps, error) {
 		Worker:   PassthroughWorker{},
 		Verifier: SmokeVerifier{},
 	}
-	// Audit log: default to ./var/aios.db (SQLite). The
-	// audit log is required for the run / resume / report
-	// / audit subcommands; init / daemon can run without
-	// one.
+	// Audit log: required for run / resume / report /
+	// audit / cancel. Optional for init and daemon start:
+	// those commands create or operate on the workspace
+	// before the audit log exists. A failure to open the
+	// audit log is a hard error for non-bootstrap
+	// subcommands.
 	auditPath := "./var/aios.db"
 	if args.LogPath != "" {
 		auditPath = args.LogPath
@@ -84,32 +106,51 @@ func BuildDeps(args *Args) (*Deps, error) {
 	if abs, err := filepath.Abs(auditPath); err == nil {
 		auditPath = abs
 	}
-	// Audit log: required for run / resume / report /
-	// audit / cancel. Optional for init and daemon start:
-	// those commands create or operate on the workspace
-	// before the audit log exists.
-	needAudit := !isInitOrDaemonStart(args)
-	if needAudit {
-		log, err := audit.Open(audit.Config{Path: auditPath})
-		if err != nil {
-			return nil, &CliError{Kind: "config", What: "open audit log " + auditPath, Cause: err}
+	log, err := audit.Open(audit.Config{Path: auditPath})
+	if err != nil {
+		if requiresPolicy(args.Command) {
+			return nil, &CliError{
+				Kind:  "config",
+				What:  fmt.Sprintf("audit log open failed: %s (run `aios init` first)", auditPath),
+				Cause: err,
+			}
 		}
+		// Bootstrap subcommand: log is optional.
+	} else {
 		deps.Audit = log
 	}
-	// Policy gateway: optional. Without it every tool
-	// call is allowed. The init subcommand does not
-	// require a policy; the other subcommands do.
-	// A policy file was passed but failed to load is a
-	// configuration error and must be reported. The
-	// already-opened audit log is closed before the
-	// function returns the error.
-	if args.ConfigPath != "" {
-		rules, err := policy.Load(args.ConfigPath)
-		if err != nil {
-			if deps.Audit != nil {
-				_ = deps.Audit.Close()
+	// Policy gateway: required for every non-bootstrap
+	// subcommand. A missing or unparseable policy file
+	// is a hard error. The init and daemon subcommands
+	// are exempt: they create the policy file (init) or
+	// wire the daemon before policy validation runs.
+	if !requiresPolicy(args.Command) {
+		// Bootstrap path: try to load a policy if one
+		// exists, but do not require it.
+		if args.ConfigPath != "" {
+			if rules, perr := policy.Load(args.ConfigPath); perr == nil {
+				deps.Policy = policy.New(rules, deps.Audit)
 			}
-			return nil, &CliError{Kind: "config", What: "load policy " + args.ConfigPath, Cause: err}
+		}
+	} else {
+		if args.ConfigPath == "" {
+			return nil, &CliError{
+				Kind: "config",
+				What: "policy file is required (use --config)",
+			}
+		}
+		rules, perr := policy.Load(args.ConfigPath)
+		if perr != nil {
+			// Policy load failed; close the audit log so
+			// we do not leak an open file handle (which
+			// Windows would refuse to delete on temp dir
+			// cleanup).
+			_ = deps.Close()
+			return nil, &CliError{
+				Kind:  "config",
+				What:  fmt.Sprintf("policy load failed: %s", args.ConfigPath),
+				Cause: perr,
+			}
 		}
 		deps.Policy = policy.New(rules, deps.Audit)
 	}
@@ -130,22 +171,6 @@ type DBPinger interface {
 }
 
 // fmtPath is a tiny helper used by the init printer.
-
-// isInitOrDaemonStart reports whether the command does
-// not need an audit log. Init creates the workspace;
-// `daemon start` boots the daemon (which opens its own
-// audit); `daemon stop` only removes a pidfile. None of
-// these touch the audit log.
-func isInitOrDaemonStart(args *Args) bool {
-	if args.Command == CmdInit {
-		return true
-	}
-	if args.Command == CmdDaemon {
-		return args.Subcommand == DaemonStart || args.Subcommand == DaemonStop
-	}
-	return false
-}
-
 func fmtPath(p string) string {
 	if p == "" {
 		return "(unset)"

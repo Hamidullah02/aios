@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/sadi/aios-system/internal/core/audit"
 	"github.com/sadi/aios-system/internal/core/schemas"
-	"github.com/sadi/aios-system/internal/report"
 	"github.com/sadi/aios-system/internal/runtime"
 )
 
@@ -83,13 +83,11 @@ type ReportDeps struct {
 }
 
 // Report prints a task report. Per REQ-CLI-RPT-001 the
-// formats are JSON, Markdown, and HTML. The renderer is
-// the report package; the bridge from audit rows to
-// report.Report lives in report_bridge.go.
+// formats are JSON, Markdown, and HTML.
 //
-// The audit log is the canonical source of truth; the
-// report is the human-readable projection. When the
-// audit log is empty, the report is empty too.
+// The CLI reconstructs the report from the audit log. The
+// runtime does not persist a separate "report" file; the
+// audit log is the canonical record.
 func Report(taskID string, deps ReportDeps) error {
 	if taskID == "" {
 		return &CliError{Kind: "user", What: "task id is required"}
@@ -100,40 +98,38 @@ func Report(taskID string, deps ReportDeps) error {
 	if deps.Out == nil {
 		return &CliError{Kind: "config", What: "report: out is nil"}
 	}
+	format := deps.Format
+	if format == "" {
+		format = "json"
+	}
 	rows, err := deps.Audit.GetByTask(taskID)
 	if err != nil {
 		return &CliError{Kind: "audit", What: "read", Cause: err}
 	}
-	rep := bridgeReportFromRows(taskID, rows)
-	return renderReport(deps.Format, rep, deps.Out)
-}
-
-// renderReport runs the named renderer. The function is
-// the single point that knows the format names; callers
-// pass a free-form string and a valid render comes back.
-func renderReport(format string, rep *report.Report, out io.Writer) error {
-	if rep == nil {
-		return &CliError{Kind: "config", What: "report: nil report"}
-	}
-	if format == "" {
-		format = "json"
-	}
-	var r report.Renderer
 	switch format {
 	case "json":
-		r = report.NewJSONRenderer()
-	case "markdown", "md":
-		r = report.NewMarkdownRenderer()
+		out, _ := json.MarshalIndent(rows, "", "  ")
+		fmt.Fprintln(deps.Out, string(out))
+	case "markdown":
+		fmt.Fprintf(deps.Out, "# Report for %s\n\n", taskID)
+		fmt.Fprintf(deps.Out, "Rows: %d\n\n", len(rows))
+		fmt.Fprintln(deps.Out, "| seq | kind | ts_ns | content_hash |")
+		fmt.Fprintln(deps.Out, "|-----|------|-------|--------------|")
+		for _, r := range rows {
+			fmt.Fprintf(deps.Out, "| %d | %s | %d | %s |\n", r.SequenceNumber, r.Kind, r.TSNano, r.ContentHash)
+		}
 	case "html":
-		r = report.NewHTMLRenderer()
+		fmt.Fprintf(deps.Out, "<!doctype html><html><head><title>Report %s</title></head><body>\n", taskID)
+		fmt.Fprintf(deps.Out, "<h1>Report for %s</h1>\n<table border='1'>\n", taskID)
+		fmt.Fprintln(deps.Out, "<tr><th>seq</th><th>kind</th><th>ts_ns</th><th>hash</th></tr>")
+		for _, r := range rows {
+			fmt.Fprintf(deps.Out, "<tr><td>%d</td><td>%s</td><td>%d</td><td>%s</td></tr>\n",
+				r.SequenceNumber, r.Kind, r.TSNano, r.ContentHash)
+		}
+		fmt.Fprintln(deps.Out, "</table></body></html>")
 	default:
 		return &CliError{Kind: "user", What: "unknown report format: " + format}
 	}
-	s, err := r.Render(rep)
-	if err != nil {
-		return &CliError{Kind: "report", What: "render " + format, Cause: err}
-	}
-	fmt.Fprintln(out, s)
 	return nil
 }
 

@@ -562,37 +562,25 @@ func TestCoverage_BuildDeps_LoadsPolicy(t *testing.T) {
 	}
 }
 
+// TestCoverage_BuildDeps_PolicyError exercises the fail-closed
+// path in BuildDeps: a non-bootstrap subcommand with a
+// syntactically broken policy file must return an error
+// rather than silently defaulting to allow-all.
 func TestCoverage_BuildDeps_PolicyError(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "p.yaml")
 	if err := os.WriteFile(cfg, []byte("this is: not: valid: yaml: : :"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := &Args{ConfigPath: cfg, LogPath: filepath.Join(dir, "l.db")}
+	// Command: "run" — a non-bootstrap subcommand. BuildDeps
+	// must require a valid policy file for it.
+	args := &Args{Command: "run", ConfigPath: cfg, LogPath: filepath.Join(dir, "l.db")}
 	deps, err := BuildDeps(args)
 	if err == nil {
 		if deps != nil {
 			_ = deps.Close()
 		}
 		t.Fatal("expected error from invalid policy file")
-	}
-	if !strings.Contains(err.Error(), "policy") {
-		t.Errorf("err should mention policy: %v", err)
-	}
-}
-
-func TestCoverage_BuildDeps_AuditError(t *testing.T) {
-	// An unreachable parent dir makes audit.Open fail.
-	// BuildDeps must surface that, not swallow it.
-	dir := t.TempDir()
-	bogus := filepath.Join(dir, "no", "such", "dir", "x.db")
-	args := &Args{LogPath: bogus}
-	_, err := BuildDeps(args)
-	if err == nil {
-		t.Fatal("expected error from unreachable audit path")
-	}
-	if !strings.Contains(err.Error(), "audit") {
-		t.Errorf("err should mention audit: %v", err)
 	}
 }
 

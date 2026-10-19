@@ -1,5 +1,0 @@
-mode: set
-github.com/sadi/aios-system/internal/core/clock/clock.go:45.39,45.60 1 1
-github.com/sadi/aios-system/internal/core/clock/clock.go:51.39,51.60 1 1
-github.com/sadi/aios-system/internal/core/clock/clock.go:61.40,61.54 1 1
-github.com/sadi/aios-system/internal/core/clock/clock.go:70.40,70.54 1 1

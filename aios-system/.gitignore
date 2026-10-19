@@ -4,7 +4,12 @@
 *.coverprofile
 
 # Test artifacts (test run output, not source)
+var/
 var/checkpoints/
+var/aios.log
+var/aios.db
+var/aios-daemon.pid
+var/aios-approval.sock
 internal/**/var/
 
 # One-off audit scripts (created for a specific doc-audit pass;

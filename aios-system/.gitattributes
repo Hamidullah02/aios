@@ -1,0 +1,33 @@
+# Line-ending policy for aios-system.
+#
+# Without an explicit policy, git's `core.autocrlf` is
+# the only knob and the value differs per machine.
+# Windows checkouts want CRLF for PowerShell scripts;
+# Go source, Markdown, YAML, JSON, and shell expect LF.
+# The policy below makes both work without warning on
+# commit and without conversion churn on rebase.
+
+# Go source: LF, no CRLF.
+*.go            text eol=lf
+
+# Tests and configuration: LF.
+*.yaml          text eol=lf
+*.yml           text eol=lf
+*.json          text eol=lf
+*.toml          text eol=lf
+*.md            text eol=lf
+*.txt           text eol=lf
+
+# PowerShell: CRLF. PowerShell on Windows refuses to
+# parse LF-only scripts that contain here-strings.
+*.ps1           text eol=crlf
+
+# Shell scripts: LF (used in test runners and CI).
+*.sh            text eol=lf
+*.bash          text eol=lf
+
+# Anything else: let `core.autocrlf` decide. The
+# explicit entries above cover the file types that
+# actually ship in the repo; this catch-all stops
+# git from warning on the rest.
+*               text=auto

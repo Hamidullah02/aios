@@ -81,20 +81,6 @@ func RunCommand(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 		return runAudit(args, deps, stdout, stderr)
 	case CmdDaemon:
 		return runDaemon(ctx, args, deps, stderr)
-	case CmdSearch:
-		return runSearch(ctx, args, deps, stdout, stderr)
-	case CmdMemory:
-		return runMemory(ctx, args, deps, stdout, stderr)
-	case CmdEgress:
-		return runEgress(ctx, args, deps, stdout, stderr)
-	case CmdBenchmark:
-		return runBenchmark(ctx, args, deps, stdout, stderr)
-	case CmdModel:
-		return runModel(ctx, args, deps, stdout, stderr)
-	case CmdSession:
-		return runSession(ctx, args, deps, stdout, stderr)
-	case CmdPlan:
-		return runPlan(ctx, args, deps, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "cli: unknown subcommand %q\n", args.Command)
 		return ExitUserError
