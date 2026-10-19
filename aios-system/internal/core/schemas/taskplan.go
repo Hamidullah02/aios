@@ -28,8 +28,8 @@ type TaskSpec struct {
 
 // Budget is the per-task budget.
 type Budget struct {
-	CostUSD      float64 `json:"cost_usd"`
-	WallClockSec int     `json:"wall_clock_sec"`
+	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+	WallClockSec int     `json:"wall_clock_sec" yaml:"wall_clock_sec"`
 }
 
 // Validate implements Schema.

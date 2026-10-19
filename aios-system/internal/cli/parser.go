@@ -64,6 +64,7 @@ type Args struct {
 	DaemonPID  string // pid file path for `daemon start` (default)
 	Objective  string // the natural-language goal for `fix`
 	Model      string // model id override for `fix` and `run` (default: planner picks)
+	PlanOut    string // path to write the planner's plan (for `fix`); empty = no write
 }
 
 // Parse parses argv into Args. argv[0] is the program name
@@ -143,10 +144,12 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	switch a.Command {
 	case CmdFix:
 		// `fix` takes a single positional (the objective)
-		// and an optional --model override. The Objective
-		// field is populated by the caller before the
-		// switch; the parser just adds the flag.
+		// and optional --model and --plan-out overrides.
+		// The Objective field is populated by the caller
+		// before the switch; the parser just adds the
+		// flags.
 		sub.StringVar(&a.Model, "model", "", "model id override (default: planner picks)")
+		sub.StringVar(&a.PlanOut, "plan-out", "", "path to write the planner's plan YAML; empty = do not persist")
 	case CmdRun:
 		sub.StringVar(&a.PlanPath, "plan", "", "path to the plan YAML file")
 	case CmdResume:

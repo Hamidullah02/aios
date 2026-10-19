@@ -1,6 +1,51 @@
 # Changelog
 
 
+v0.34.0 — aios fix --plan-out: persist the planner's plan
+
+The planner's TaskPlan used to live in memory only.
+`aios fix "..." --plan-out <path>` now writes the
+plan to the path the user picks, prints the path,
+then runs the plan. The user can then `aios run
+<path>` to re-run the same plan (optionally after
+editing the YAML).
+
+What changed:
+
+  * `internal/cli/plan_writer.go` (new): the
+    `WritePlanYAML` helper serialises a *TaskPlan
+    to the runtime's plan YAML format and writes
+    it to disk. It mirrors the test fixtures in
+    `run_e2e_test.go` byte-for-byte so a file
+    written here is loadable by `LoadPlan`.
+  * `internal/cli/main.go runFix`: when
+    `args.PlanOut != ""`, the helper is called
+    BEFORE the loop runs so a write error stops
+    the run (we do not claim success and
+    silently drop the plan).
+  * `internal/cli/parser.go`: new `--plan-out`
+    flag on the `fix` subcommand. Default is
+    empty (no write) so the existing
+    `aios fix` behaviour is unchanged.
+  * `internal/core/schemas/taskplan.go`:
+    added `yaml:"cost_usd"` and
+    `yaml:"wall_clock_sec"` tags to the
+    `Budget` struct. Without these, the
+    gopkg.in/yaml.v3 default name mapping
+    would have read them as `costusd` and
+    `wallclocksec`, and the existing test
+    fixtures never exercised the Budget
+    field so the bug was latent.
+
+Tests: 7 new (TestWritePlanYAML_RoundTrip,
+TestWritePlanYAML_EmptyPath, TestWritePlanYAML_NilPlan,
+TestWritePlanYAML_InvalidPlan,
+TestWritePlanYAML_CreatesParentDir,
+TestRunFix_PlanOutWritesFile,
+TestRunFix_PlanOutThenRunAgain). All 30 packages
+still green; `go vet` clean; `gofmt -l .` clean.
+
+
 
 v0.33.0 â€” ios fix <objective>: the planner turn
 
@@ -11,7 +56,8 @@ turn. ios fix <objective> is the doc set's primary
 entry point â€” the CLI takes a natural-language
 objective, calls the planner to turn it into a
 TaskPlan, and runs the plan through the same loop
-un uses.
+
+un uses.
 
 The full chain is now:
 
@@ -50,8 +96,10 @@ What changed:
   The production plannerToolSpecs returns the
   planner's view of the tool set: a flat
   {Name, Description, InputSchema, RiskTier} map
-  for ead_file, search_files, write_file,
-  un_shell, and sk_user. The descriptions and
+  for 
+ead_file, search_files, write_file,
+  
+un_shell, and sk_user. The descriptions and
   schemas are the strings the model reads when it
   decides which tool to dispatch to. The tool list
   mirrors the bus's tool map in wireAgentLoop; the
@@ -72,10 +120,12 @@ What changed:
   report, audit) leave the planner nil â€” they
   operate on a plan file that already exists.
 
-- **internal/cli/main.go â€” new unFix handler.**
+- **internal/cli/main.go â€” new 
+unFix handler.**
   The handler calls planner.Plan(ctx, args.Objective,
   nil), then runs the resulting plan through the
-  shared unWithApprovals inner loop. The chain
+  shared 
+unWithApprovals inner loop. The chain
   is: planner -> BusWorker -> bus -> policy -> tool
   -> audit -> CommandVerifier. The handler fails
   closed: a missing planner, a model call error
@@ -96,9 +146,11 @@ What changed:
   Five tests guard the wiring:
     - TestBuildDeps_WiresPlannerForFix â€”
       asserts BuildDeps wires a planner for
-      ix but leaves it nil for un.
+      ix but leaves it nil for 
+un.
     - TestRunFix_RequiresObjective â€” asserts
-      unFix returns a user error when the
+      
+unFix returns a user error when the
       objective is empty.
     - TestRunFix_RealChain â€” drives the full
       chain with a stub model that returns a
@@ -147,7 +199,8 @@ Substitutions vs the doc set:
   doc set describes ios fix <objective> as the
   primary entry point. This version makes it
   explicit: a top-level subcommand, not a flag on
-  un.
+  
+un.
 
 - **The planner verifier is planner.NewCodeFirstVerifier.**
   The planner's repair loop uses the same verifier
@@ -189,7 +242,8 @@ previous release did not act on) demanded:
 > real result â†’ real verifier. Real CommandVerifier.
 > The product needs an honest worker, not a stub."
 
-This version answers that. The CLI's un
+This version answers that. The CLI's 
+un
 subcommand now executes a real model â†’ tool â†’
 result â†’ verifier chain. The previous default
 (PassthroughWorker + SmokeVerifier) did not
@@ -232,8 +286,10 @@ What changed:
   subcommand (i.e. every subcommand except init
   and daemon), BuildDeps constructs a
   	ools.Bus with the production tool set
-  (ead_file, search_files, write_file,
-  un_shell with a SubprocessRunner,
+  (
+ead_file, search_files, write_file,
+  
+un_shell with a SubprocessRunner,
   sk_user), wraps it in a *BusWorker with
   the StdinPromptCallback, and pairs it with
   a CommandVerifier. The Deps struct gains a
@@ -245,7 +301,9 @@ What changed:
   flag.** The workspace is the root the tool bus
   uses to resolve relative paths. The default is
   the parent directory of --config. The flag
-  is global so un, esume, and cancel
+  is global so 
+un, 
+esume, and cancel
   share the same workspace.
 
 - **internal/cli/smoke_test.go â€” the end-to-end
@@ -253,7 +311,8 @@ What changed:
   tests relied on PassthroughWorker +
   SmokeVerifier and would have rubber-stamped
   a denied read. The new tests use a real
-  ead_file against a real file in a temp
+  
+ead_file against a real file in a temp
   workspace, with a policy that allows the read,
   and assert a real 	ool_call audit row was
   written.
@@ -267,7 +326,8 @@ What changed:
       asserts init and daemon get a nil
       worker (they do not run plans).
     - TestRunCommand_RealToolCall â€” runs a
-      real ead_file end-to-end through Main,
+      real 
+ead_file end-to-end through Main,
       asserts a 	ool_call audit row was
       written with decision: "allow".
     - TestRunCommand_VerifierRejectsUnknownTool
@@ -291,7 +351,8 @@ Verified:
 - gofmt -l . clean.
 - go test ./... â€” 30 packages pass.
 - Live end-to-end: ios init + ios run
-  <plan.yaml> with a real ead_file task.
+  <plan.yaml> with a real 
+ead_file task.
   The audit log shows three rows: a
   policy_decision (the bus's gateway), a
   	ool_call (the bus's audit row), and a
@@ -300,7 +361,8 @@ Verified:
 
 Substitutions vs the doc set:
 
-- **ix <objective> â†’ un <plan.yaml>.** The
+- **ix <objective> â†’ 
+un <plan.yaml>.** The
   doc set describes ios fix <objective> as the
   single entry point: the planner turns the
   objective into a plan, the worker executes the

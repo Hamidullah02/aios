@@ -223,6 +223,19 @@ func runFix(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Write
 		return ExitSystemError
 	}
 	fmt.Fprintf(stdout, "Plan:     %s (tasks=%d)\n", plan.ID, len(plan.Tasks))
+	// Persist the plan when --plan-out is set. The file
+	// is loadable by `aios run <path>` so a user can
+	// re-run the planner's plan after editing it. The
+	// write happens BEFORE the loop runs so a write
+	// error stops the run (we do not want to claim
+	// success and silently drop the plan).
+	if args.PlanOut != "" {
+		if err := WritePlanYAML(plan, args.PlanOut); err != nil {
+			fmt.Fprint(stderr, DisplayError(err, args.Debug))
+			return ExitCodeFor(err)
+		}
+		fmt.Fprintf(stdout, "Wrote:    %s\n", args.PlanOut)
+	}
 	// Run the plan through the same loop `run` uses.
 	// This is the part the v0.32.0 commit landed: the
 	// BusWorker dispatches to the bus, the bus consults
