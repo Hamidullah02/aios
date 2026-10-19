@@ -223,6 +223,19 @@ func BuildDeps(args *Args) (*Deps, error) {
 				_ = deps.Close()
 				return nil, err
 			}
+			// The `fix` subcommand now has a router.
+			// Wire the SelfCheckTool (it needs a Judge)
+			// into the bus late. The bus has a Register
+			// method for exactly this case.
+			if deps.Router != nil {
+				// Only add the SelfCheckTool here.
+				// RunTestsTool was already wired by
+				// wireAgentLoop.
+				late := wireSelfCheckOnly(deps.Router, deps.Audit)
+				if late != nil {
+					deps.Bus.Register("self_check", late)
+				}
+			}
 		}
 	}
 	return deps, nil
@@ -258,6 +271,14 @@ func wireAgentLoop(deps *Deps, args *Args) error {
 		"write_file":   tools.WriteFileTool{},
 		"run_shell":    tools.RunShellTool{Runner: sandbox.NewSubprocessRunner()},
 		"ask_user":     askBusAdapter{tool: askTool},
+	}
+	// Verify-package tools. The RunTestsTool is always
+	// wired (no model dependency). SelfCheckTool is
+	// wired below after the router is built (only
+	// for `fix`).
+	verifyTools := wireVerifyTools(nil, deps.Audit)
+	for name, tool := range verifyTools {
+		toolSet[name] = tool
 	}
 	// Build the bus. The bus owns the tool map, the
 	// policy gateway, and the audit log. The gateway

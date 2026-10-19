@@ -1,6 +1,54 @@
 # Changelog
 
 
+v0.35.0 — verify tools wired into the bus
+
+The verify package (verify.SelfCheckTool,
+verify.RunTestsTool) was an orphan: the package had
+unit tests, the doc set named both tools as required
+modules, but the CLI never registered them on the
+tool bus. This version wires them in.
+
+What changed:
+
+  * internal/cli/verify_wiring.go (new):
+    wireVerifyTools (returns run_tests always,
+    self_check only when a router is available),
+    wireSelfCheckOnly (the deferred-wiring path),
+    and the routerJudge adapter (models.Router ->
+    verify.Judge). The adapter lives in cli, not
+    verify, so verify does not import aios-models.
+  * internal/cli/deps.go wireAgentLoop: run_tests
+    is now in the bus from the start (no model
+    dependency). After wirePlanner (only for
+    `fix`) self_check is registered on the bus
+    via the new bus.Register method.
+  * internal/tools/bus.go: new Register(name,
+    tool) method. The bus was immutable; this
+    method exists for the deferred-wiring case.
+  * internal/verify (untouched but now reachable):
+    SelfCheckTool, RunTestsTool, and the
+    per-runner parsers are the production code
+    the doc set names in aios-verify.
+
+Tests: 11 new (TestWireVerifyTools_*, 
+TestWireSelfCheckOnly_*, TestRouterJudge_*,
+TestBuildDeps_RunSubcommand*,
+TestRunTests_EndToEnd,
+TestRunTests_NotFoundRunnerStillProvesRegistered,
+TestSelfCheckTool_ParseResponse). All 30
+packages green; go vet clean; gofmt -l . clean.
+
+Smoke: aios run with a run_tests task dispatches
+through the production bus and the tool runs the
+subprocess (the audit row is written). The
+run_tests tool currently has a pre-existing env
+quirk (it sets only CI=1 and does not pass PATH),
+so a real `go test` invocation fails inside the
+tool. That is a v0.36.0 fix in the verify
+package, not a v0.35.0 issue.
+
+
 v0.34.0 — aios fix --plan-out: persist the planner's plan
 
 The planner's TaskPlan used to live in memory only.

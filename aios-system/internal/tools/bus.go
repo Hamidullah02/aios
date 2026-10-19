@@ -44,6 +44,21 @@ func New(cfg Config) *Bus {
 	}
 }
 
+// Register adds a tool to the bus. The bus is normally
+// immutable after construction; this method exists for
+// the deferred-wiring case where a dependency is built
+// after the bus (e.g. verify.SelfCheckTool needs a
+// model router that is built only by the `fix`
+// subcommand). The method is a single-line helper; it
+// is intentionally not part of the public doc-set
+// surface.
+func (b *Bus) Register(name string, tool Tool) {
+	if b.tools == nil {
+		b.tools = make(map[string]Tool)
+	}
+	b.tools[name] = tool
+}
+
 // Dispatch runs the tool call. The bus returns a Result and
 // an error. A successful call has OK=true and a nil error;
 // a policy-deny has OK=false and ErrPolicyDeny wrapped in
