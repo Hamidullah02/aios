@@ -5,9 +5,12 @@ import (
 	"path/filepath"
 
 	"github.com/sadi/aios-system/internal/approvals"
+	"github.com/sadi/aios-system/internal/ask"
 	"github.com/sadi/aios-system/internal/core/audit"
 	"github.com/sadi/aios-system/internal/policy"
 	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/sadi/aios-system/internal/sandbox"
+	"github.com/sadi/aios-system/internal/tools"
 )
 
 // subcommands that bootstrap the workspace. These run
@@ -42,6 +45,7 @@ type Deps struct {
 	Audit     *audit.Log
 	Policy    *policy.Gateway
 	Resume    *runtime.ResumeHandler
+	Bus       *tools.Bus
 	Worker    runtime.Worker
 	Verifier  runtime.Verifier
 	Budget    runtime.Budget
@@ -77,21 +81,35 @@ func (d *Deps) Close() error {
 // The function is best-effort: the production binary
 // treats a failure here as exit code 2 (system error).
 //
-// Worker and Verifier are wired to the passthrough
-// implementations so `aios run <plan.yaml>` is runnable
-// in a smoke-test without a real agent. Production
-// deployments replace the worker with a real one (the
-// planner-driven worker, a code-generation worker, etc.)
-// by mutating deps.Worker / deps.Verifier after this
-// call.
+// Worker and Verifier are wired to the production
+// implementations:
+//
+//   - Worker is a *BusWorker that dispatches each task to
+//     the tools.Bus. The bus, in turn, runs the policy
+//     gateway, executes the tool, and writes the audit
+//     row. This is the model->tool->result loop the doc
+//     set describes; the previous default (PassthroughWorker)
+//     did not touch the bus and silently passed every
+//     task.
+//   - Verifier is a CommandVerifier that inspects the
+//     bus's WorkerResult and rejects empty outputs, OK=false
+//     results, and non-empty error strings. The previous
+//     default (SmokeVerifier) returned VerdictPass for
+//     every result and therefore rubber-stamped every
+//     tool call, including failed ones.
+//
+// The bus is constructed with the production tool set:
+// read_file, search_files, write_file, run_shell (with
+// a SubprocessRunner), and ask_user (with a stdin prompt
+// callback). Tests can inject a custom bus by mutating
+// deps.Bus after this call returns and rebuilding the
+// worker on top of it.
 func BuildDeps(args *Args) (*Deps, error) {
 	if args == nil {
 		return nil, &CliError{Kind: "config", What: "args is nil"}
 	}
 	deps := &Deps{
-		Budget:   runtime.Budget{},
-		Worker:   PassthroughWorker{},
-		Verifier: SmokeVerifier{},
+		Budget: runtime.Budget{},
 	}
 	// Audit log: required for run / resume / report /
 	// audit / cancel. Optional for init and daemon start:
@@ -160,7 +178,80 @@ func BuildDeps(args *Args) (*Deps, error) {
 	// when running; the CLI's run subcommand does not
 	// require it.
 	deps.Approvals = approvals.New(approvals.Config{Audit: deps.Audit})
+	// Tool bus + worker + verifier. These are the agent
+	// loop the doc set describes: each task flows from
+	// the orchestrator to the BusWorker, the worker
+	// dispatches to the bus, the bus consults the policy
+	// gateway, runs the tool, and writes the audit row,
+	// and the verifier inspects the result.
+	//
+	// Bootstrap subcommands (init, daemon) skip the
+	// wiring: they do not need a worker because they do
+	// not run plans.
+	if requiresPolicy(args.Command) {
+		if err := wireAgentLoop(deps, args); err != nil {
+			_ = deps.Close()
+			return nil, err
+		}
+	}
 	return deps, nil
+}
+
+// wireAgentLoop constructs the tools.Bus, the BusWorker,
+// and the CommandVerifier, and wires them into deps. The
+// function is split out of BuildDeps because the wiring
+// is non-trivial and reading it in isolation is easier
+// than reading it inside the larger BuildDeps body.
+//
+// The function assumes the policy gateway is already
+// loaded (deps.Policy != nil for non-bootstrap
+// subcommands) and the audit log is open (deps.Audit
+// may be nil; the bus handles that case).
+func wireAgentLoop(deps *Deps, args *Args) error {
+	// Build the production tool set. The set is the
+	// minimum the doc set lists: read_file, search_files,
+	// write_file, run_shell, and ask_user. run_shell uses
+	// a SubprocessRunner; ask_user uses a stdin prompt
+	// callback so the operator can answer interactively.
+	askTool, err := ask.New((&StdinPromptCallback{}).StdinPrompt(), nil)
+	if err != nil {
+		return &CliError{
+			Kind:  "config",
+			What:  "ask tool init failed",
+			Cause: err,
+		}
+	}
+	toolSet := map[string]tools.Tool{
+		"read_file":    tools.ReadFileTool{},
+		"search_files": tools.SearchFilesTool{},
+		"write_file":   tools.WriteFileTool{},
+		"run_shell":    tools.RunShellTool{Runner: sandbox.NewSubprocessRunner()},
+		"ask_user":     askBusAdapter{tool: askTool},
+	}
+	// Build the bus. The bus owns the tool map, the
+	// policy gateway, and the audit log. The gateway
+	// is required for the agent loop: without it the
+	// bus would allow every tool call.
+	bus := tools.New(tools.Config{
+		Tools:  toolSet,
+		Policy: deps.Policy,
+		Audit:  deps.Audit,
+	})
+	deps.Bus = bus
+	// Resolve the workspace root. The default is the
+	// parent directory of the policy file (the same
+	// convention `aios init` uses for the scaffold).
+	// Operators can override with --workspace.
+	workspace := args.Workspace
+	if workspace == "" {
+		workspace = filepath.Dir(args.ConfigPath)
+	}
+	if abs, err := filepath.Abs(workspace); err == nil {
+		workspace = abs
+	}
+	deps.Worker = NewBusWorker(bus, askTool, workspace)
+	deps.Verifier = NewCommandVerifier()
+	return nil
 }
 
 // DBPinger is a small interface the CLI uses to verify the

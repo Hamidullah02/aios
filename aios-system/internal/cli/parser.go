@@ -44,6 +44,7 @@ type Args struct {
 	Debug      bool
 	ConfigPath string
 	LogPath    string
+	Workspace  string // tool-bus workspace root; default = dirname of ConfigPath
 
 	// Subcommand-specific fields. The handler picks what it
 	// needs; the others stay at their zero value.
@@ -77,6 +78,7 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	fs.BoolVar(&a.Debug, "debug", false, "print the full error traceback on failure")
 	fs.StringVar(&a.ConfigPath, "config", "./var/config.yaml", "path to the config file")
 	fs.StringVar(&a.LogPath, "log", "./var/aios.log", "path to the log file")
+	fs.StringVar(&a.Workspace, "workspace", "", "tool-bus workspace root; default = dirname of --config")
 	fs.StringVar(&a.SocketPath, "socket", "/tmp/aios-approval.sock", "approval daemon socket path")
 	fs.StringVar(&a.DaemonPID, "pidfile", "./var/aios-daemon.pid", "path to the daemon pid file")
 	// --format and --tail are subcommand-specific and

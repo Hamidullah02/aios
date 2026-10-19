@@ -13,22 +13,32 @@ import (
 )
 
 // TestMain_EndToEndRun is a smoke test that runs the real
-// CLI entry point with a real plan and the passthrough
-// worker. The test exercises:
+// CLI entry point with a real plan and the real agent
+// loop (BusWorker + tools.Bus + CommandVerifier). The
+// test exercises:
 //
 //  1. argv parsing for `run`.
-//  2. BuildDeps wiring the audit + resume + passthrough worker.
+//  2. BuildDeps wiring the audit + policy + resume +
+//     BusWorker + CommandVerifier.
 //  3. LoadPlan + the orchestrator + report printing.
 //  4. Exit code 0 on success.
+//  5. A real tool call (read_file) producing a real
+//     audit row.
 func TestMain_EndToEndRun(t *testing.T) {
 	// Create a temp workspace.
 	dir := t.TempDir()
+	// Write a real file the read_file task can read.
+	target := filepath.Join(dir, "design.md")
+	if err := os.WriteFile(target, []byte("hello aios"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	planPath := filepath.Join(dir, "plan.yaml")
 	plan := &schemas.TaskPlan{
 		ID: "smoke-1", Goal: "ship aios",
 		Tasks: []schemas.TaskSpec{
-			{ID: "t1", Description: "read the design", Tool: "read_file", Acceptance: "doc exists"},
-			{ID: "t2", Description: "write a test", Tool: "edit_file", Acceptance: "test passes"},
+			{ID: "t1", Description: "read the design", Tool: "read_file",
+				Acceptance: "doc exists",
+				Inputs:     []string{"path=design.md"}},
 		},
 	}
 	yaml := "id: " + plan.ID + "\n" +
@@ -39,15 +49,18 @@ func TestMain_EndToEndRun(t *testing.T) {
 			"    description: " + task.Description + "\n" +
 			"    acceptance: " + task.Acceptance + "\n" +
 			"    tool: " + task.Tool + "\n"
+		for _, in := range task.Inputs {
+			yaml += "    inputs:\n      - " + in + "\n"
+		}
 	}
 	if err := os.WriteFile(planPath, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Policy file: required by fail-closed. Empty rules
-	// list is valid; the smoke test exercises the
-	// passthrough worker which does not consult policy.
+	// Policy file: required by fail-closed. The test
+	// grants read_file access (an empty rules list would
+	// deny it via the bus's default-deny path).
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
-		[]byte("rules: []\n"), 0o644); err != nil {
+		[]byte("rules:\n  - id: allow-read\n    match:\n      tool: read_file\n    action: allow\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Audit log path inside the temp dir.
@@ -56,6 +69,7 @@ func TestMain_EndToEndRun(t *testing.T) {
 		"aios",
 		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + auditPath,
+		"--workspace=" + dir,
 		"run", planPath,
 	}
 	var stdout, stderr bytes.Buffer
@@ -69,18 +83,28 @@ func TestMain_EndToEndRun(t *testing.T) {
 	if !strings.Contains(stdout.String(), "completed") {
 		t.Errorf("output should mention completion: %s", stdout.String())
 	}
-	// The audit log should have at least one row.
+	// The audit log should have at least one tool_call
+	// row for the real read_file dispatch.
 	log, err := audit.Open(audit.Config{Path: auditPath})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer log.Close()
-	rows, err := log.GetByTask("smoke-1")
+	rows, err := log.GetByKind("tool_call", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) < 2 {
-		t.Errorf("expected at least 2 audit rows, got %d", len(rows))
+	if len(rows) < 1 {
+		t.Errorf("expected at least 1 tool_call row, got %d", len(rows))
+	}
+	// Verify a decision row was written too (the policy
+	// gateway wrote it).
+	drows, err := log.GetByKind("decision", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drows) < 1 {
+		t.Errorf("expected at least 1 decision row, got %d", len(drows))
 	}
 }
 
@@ -161,23 +185,33 @@ func TestMain_EndToEndResume(t *testing.T) {
 
 // TestMain_EndToEndReport exercises the report subcommand
 // through Main. The plan must be run first to populate
-// the audit log.
+// the audit log. The plan runs a real read_file against
+// a real file in the workspace so the real BusWorker +
+// CommandVerifier chain produces a real audit row.
 func TestMain_EndToEndReport(t *testing.T) {
 	dir := t.TempDir()
+	// Write a real file the plan will read.
+	if err := os.WriteFile(filepath.Join(dir, "doc.md"),
+		[]byte("# design\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	planPath := filepath.Join(dir, "plan.yaml")
 	if err := os.WriteFile(planPath, []byte(
 		"id: rpt-1\n"+
 			"goal: ship\n"+
 			"tasks:\n"+
 			"  - id: t1\n"+
-			"    description: x\n"+
-			"    acceptance: y\n"+
-			"    tool: read_file\n"), 0o644); err != nil {
+			"    description: read the doc\n"+
+			"    acceptance: ok\n"+
+			"    tool: read_file\n"+
+			"    inputs:\n      - path=doc.md\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Policy file: required by fail-closed.
+	// Policy that grants read_file access. The default-
+	// deny would block the read; the report test wants
+	// the run to succeed.
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
-		[]byte("rules: []\n"), 0o644); err != nil {
+		[]byte("rules:\n  - id: allow-read\n    match:\n      tool: read_file\n    action: allow\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	auditPath := filepath.Join(dir, "aios.db")
@@ -186,6 +220,7 @@ func TestMain_EndToEndReport(t *testing.T) {
 		"aios",
 		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + auditPath,
+		"--workspace=" + dir,
 		"run", planPath,
 	}, &bytes.Buffer{}, &bytes.Buffer{})
 	if code != 0 {
@@ -246,23 +281,32 @@ func TestMain_EndToEndCancel(t *testing.T) {
 }
 
 // TestMain_EndToEndAudit exercises the audit subcommand
-// through Main after a real run.
+// through Main after a real run. The plan runs a real
+// read_file against a real file so the real BusWorker
+// chain produces audit rows for the audit subcommand to
+// print.
 func TestMain_EndToEndAudit(t *testing.T) {
 	dir := t.TempDir()
+	// Write a real file the plan will read.
+	if err := os.WriteFile(filepath.Join(dir, "doc.md"),
+		[]byte("# audit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	planPath := filepath.Join(dir, "plan.yaml")
 	if err := os.WriteFile(planPath, []byte(
 		"id: aud-1\n"+
 			"goal: ship\n"+
 			"tasks:\n"+
 			"  - id: t1\n"+
-			"    description: x\n"+
-			"    acceptance: y\n"+
-			"    tool: read_file\n"), 0o644); err != nil {
+			"    description: read the doc\n"+
+			"    acceptance: ok\n"+
+			"    tool: read_file\n"+
+			"    inputs:\n      - path=doc.md\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Policy file: required by fail-closed.
+	// Policy that grants read_file access.
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
-		[]byte("rules: []\n"), 0o644); err != nil {
+		[]byte("rules:\n  - id: allow-read\n    match:\n      tool: read_file\n    action: allow\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	auditPath := filepath.Join(dir, "aios.db")
@@ -270,6 +314,7 @@ func TestMain_EndToEndAudit(t *testing.T) {
 		"aios",
 		"--config=" + filepath.Join(dir, "config.yaml"),
 		"--log=" + auditPath,
+		"--workspace=" + dir,
 		"run", planPath,
 	}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("run code: %d", code)
