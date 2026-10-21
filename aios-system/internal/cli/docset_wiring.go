@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"github.com/sadi/aios-system/internal/core/audit"
 	"github.com/sadi/aios-system/internal/edit"
 	"github.com/sadi/aios-system/internal/git"
 	"github.com/sadi/aios-system/internal/image"
+	"github.com/sadi/aios-system/internal/memory"
+	"github.com/sadi/aios-system/internal/memorytool"
 	"github.com/sadi/aios-system/internal/search"
 	"github.com/sadi/aios-system/internal/tools"
 )
@@ -39,11 +42,15 @@ import (
 //
 // Not registered here:
 //
-//   - benchmark, fanout, optimizer, persist, roles,
-//     memory: these packages are libraries with no
-//     tools.Tool implementation. Wiring them needs new
-//     adapter types, not just registration; tracked
-//     separately.
+//   - benchmark, fanout, optimizer, persist, roles:
+//     these packages are libraries with no tools.Tool
+//     implementation. Wiring them needs new adapter
+//     types, not just registration; tracked separately.
+//   - memory: also a library, but v0.39.0 added the
+//     internal/memorytool adapters, so it is registered
+//     through wireMemoryTools instead of the literal
+//     below (it needs a constructed *memory.Memory, and
+//     the two tools must share one instance).
 //   - task, file_watcher (internal/watch): wired under
 //     the daemon subcommand, which builds a SubAgentFactory.
 //   - self_check: needs a model router; see
@@ -77,5 +84,26 @@ func wireDocSetTools() map[string]tools.Tool {
 
 		// image package (REQ-IMG-*)
 		"read_image": image.ReadImageTool{},
+	}
+}
+
+// wireMemoryTools registers the memory adapters
+// (v0.39.0).
+//
+// Unlike wireDocSetTools these need a constructed
+// *memory.Memory, and BOTH tools must receive the same
+// instance: the read tool has to see what the write tool
+// stored. A nil mem means "memory is not available"; the
+// tools then return a typed error rather than panicking,
+// so a workspace whose data dir is unwritable still
+// starts and every other tool still works.
+func wireMemoryTools(mem *memory.Memory, auditLog *audit.Log) map[string]tools.Tool {
+	return map[string]tools.Tool{
+		// Read-only surface. Separate from memory_write so
+		// a policy rule can grant recall without also
+		// granting persist / delete.
+		"memory": memorytool.ReadTool{Mem: mem, Audit: auditLog},
+		// Mutating surface.
+		"memory_write": memorytool.WriteTool{Mem: mem, Audit: auditLog},
 	}
 }

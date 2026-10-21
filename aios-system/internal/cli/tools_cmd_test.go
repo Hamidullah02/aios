@@ -100,6 +100,7 @@ func TestRunTools_ListsEveryWiredTool(t *testing.T) {
 		"git_status", "git_diff", "git_log", "git_commit", "git_branch", "git_worktree",
 		"grep", "glob", "code_search", "diagnostics",
 		"read_image",
+		"memory", "memory_write",
 	}
 	got := strings.Join(names, ",")
 	for _, name := range want {

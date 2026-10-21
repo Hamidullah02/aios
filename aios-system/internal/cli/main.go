@@ -197,7 +197,15 @@ func runTools(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	// audit.db, which is exactly the situation where a
 	// user is trying to figure out what went wrong.
 	names := make([]string, 0)
+	// The doc-set set that needs no construction.
 	for name := range wireDocSetTools() {
+		names = append(names, name)
+	}
+	// The memory adapters (v0.39.0). We pass a nil
+	// Memory because the listing only needs the tool
+	// names, and the tools themselves fail cleanly when
+	// the memory is not wired.
+	for name := range wireMemoryTools(nil, nil) {
 		names = append(names, name)
 	}
 	// The minimum five from wireAgentLoop plus the

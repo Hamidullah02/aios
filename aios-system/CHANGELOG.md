@@ -1,4 +1,85 @@
 # Changelog
+v0.39.0 — expose the memory layer as tools
+(`memory`, `memory_write`)
+
+`internal/memory` shipped a complete, tested
+implementation of the doc set's memory layer — three
+scopes, a content-addressed store, a typed index, the
+query language, compaction, at-rest encryption — and no
+way for an agent to reach any of it. It was not a
+`tools.Tool`, so a plan that asked the agent to "remember
+this decision" or "recall the last commit we made" had
+nothing to dispatch. `aios tools` could not even name
+it.
+
+internal/memorytool (new) — two tools over the shared
+`memory.Memory` facade:
+
+  * "memory"       read-only. Actions: search (default),
+                   recall, stats.
+  * "memory_write" mutating. Actions: remember, forget.
+
+Two tools rather than one so a policy rule can grant
+recall without also granting persist and delete. On a
+default-deny workspace that distinction is the whole
+point.
+
+Notable behaviour:
+
+  * Both tools receive the SAME `*memory.Memory`. Two
+    instances would split the memory in half: every write
+    "succeeds" and every read comes back empty. There is a
+    behavioural test for this (TestWireMemoryTools_
+    SharesOneInstance), not just a structural one.
+  * forget is a soft delete via `Index.Prune`
+    (REQ-MEM-CLI-005) and prunes across every scope
+    holding the hash. Content addressing means the same
+    content in two scopes yields one hash in both, so
+    "forget this" must mean "gone everywhere".
+  * remember defaults kind=observation, scope=project,
+    and session_id to the bus context's TaskID, so a plan
+    that only says "remember this" still produces an
+    attributable artifact.
+  * An unknown action is an error, not a silent empty
+    result. Without this a typo like action="serach"
+    reads to the model as "no matches".
+  * A nil Memory returns a typed error rather than
+    panicking, and the tools stay registered so a plan
+    gets "memory is not wired" instead of
+    ToolNotFoundError — which would otherwise send an
+    operator looking for a policy problem instead of a
+    filesystem one.
+
+internal/cli/other_commands.go — `aios audit` unions a
+hard-coded list of well-known row kinds, and
+"memory_write" was not in it, so the rows the memory
+tools wrote were invisible to `aios audit` even though
+they were correctly persisted. Added to the list.
+
+Tests added (19): 15 in internal/memorytool (round trip,
+shared-instance isolation, remember defaults and
+validation, cross-scope forget, unknown hash, unknown
+action, nil memory, stats per scope, audit rows, name
+pins, arg coercion) + 3 in internal/cli (shared instance
+through the wired tools, nil-memory-still-registers,
+names match keys).
+
+Verified end to end: `aios tools` lists both. `aios run`
+on a three-task plan (remember via memory_write, search
+via memory, stats via memory) exits 0, leaves the
+artifact on disk at var/memory/{index/index.json,
+raw/<sha256>}, and writes 3 tool_call rows plus 1
+memory_write row visible through `aios audit`.
+
+Known gap surfaced by the smoke: the BusWorker passes
+task inputs through verbatim, with no `$vars.<name>`
+interpolation between tasks, so a plan cannot feed one
+task's output hash into a later task's input. `forget` is
+therefore reachable from a plan only when the operator
+knows the hash up front. Interpolation is a separate
+change to internal/cli/bus_worker.go.
+
+---
 v0.38.0 — wire the edit / git / search / image tool
 set into the bus, add `aios tools`
 

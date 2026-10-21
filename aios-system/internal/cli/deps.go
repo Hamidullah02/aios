@@ -8,6 +8,7 @@ import (
 	"github.com/sadi/aios-system/internal/ask"
 	"github.com/sadi/aios-system/internal/core/audit"
 	"github.com/sadi/aios-system/internal/egress"
+	"github.com/sadi/aios-system/internal/memory"
 	"github.com/sadi/aios-system/internal/models"
 	"github.com/sadi/aios-system/internal/planner"
 	"github.com/sadi/aios-system/internal/policy"
@@ -311,6 +312,33 @@ func wireAgentLoop(deps *Deps, args *Args) error {
 		// The verify set wins on a name collision so a
 		// future rename in another package cannot
 		// silently change what run_tests resolves to.
+		if _, exists := toolSet[name]; exists {
+			continue
+		}
+		toolSet[name] = tool
+	}
+	// v0.39.0: the memory adapters. Unlike the literal set
+	// above these need a constructed *memory.Memory, and
+	// both tools share one instance so a write is visible
+	// to a read in the same process.
+	//
+	// Construction is best-effort: a workspace whose data
+	// dir is unwritable still starts, the memory tools
+	// return a typed error rather than panicking, and every
+	// other tool keeps working. Failing the whole CLI over
+	// an unwritable memory directory would make the
+	// problem strictly worse than not having memory.
+	mem, memErr := memory.NewMemory(memory.MemoryConfig{})
+	if memErr != nil {
+		// Leave mem nil. wireMemoryTools still registers
+		// the two tools so `aios tools` shows them and a
+		// plan gets a clear "memory is not wired" error
+		// instead of ToolNotFoundError, which would send
+		// the operator looking for a policy problem.
+		mem = nil
+	}
+	memoryTools := wireMemoryTools(mem, deps.Audit)
+	for name, tool := range memoryTools {
 		if _, exists := toolSet[name]; exists {
 			continue
 		}

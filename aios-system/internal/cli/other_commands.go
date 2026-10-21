@@ -183,6 +183,12 @@ func Audit(taskID string, deps AuditDeps) error {
 			"tool_call", "approval_requested", "approval_granted",
 			"approval_denied", "approval_expired", "task_started",
 			"task_passed", "task_failed", "plan_dispatched",
+			// memory_write (v0.39.0): the row the
+			// memory tools write above and beyond the
+			// bus's tool_call row, so an operator can
+			// see what was persisted vs just what was
+			// dispatched.
+			"memory_write",
 		}
 		for _, k := range kinds {
 			r, err := deps.Audit.GetByKind(k, 1000)
