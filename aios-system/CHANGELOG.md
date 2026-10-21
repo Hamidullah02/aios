@@ -1,4 +1,101 @@
 # Changelog
+v0.38.0 — wire the edit / git / search / image tool
+set into the bus, add `aios tools`
+
+Every package outside internal/tools that implements the
+doc set already had a working `tools.Tool`, its own
+test suite, and a place in the same binary — and none
+of them were reachable. `wireAgentLoop` registered
+exactly five tools:
+
+    read_file, search_files, write_file, run_shell, ask_user
+    (plus run_tests from v0.36.0)
+
+A user writing `tool: edit` in a TaskPlan got
+`ToolNotFoundError` from a binary that contained
+`edit.EditTool`, `git.GitStatusTool`, `search.GrepTool`
+and fifteen others. The gap was invisible because
+nothing could ask the bus what it had.
+
+What changed:
+
+  * internal/cli/docset_wiring.go (new) —
+    wireDocSetTools registers 16 tools that already
+    satisfy tools.Tool:
+
+      edit:    edit, multi_edit, apply_patch, write,
+               notebook_edit
+      git:     git_status, git_diff, git_log,
+               git_commit, git_branch, git_worktree
+      search:  grep, glob, code_search, diagnostics
+      image:   read_image
+
+    All are zero-value structs; the git tools' Runner
+    field is unexported and nil means "use the default
+    subprocess runner" (GitStatusTool.runner), so
+    `git.GitStatusTool{}` is the correct construction.
+
+    Deliberately not registered:
+
+      - benchmark, fanout, optimizer, persist, roles,
+        memory: these are libraries with no tools.Tool
+        implementation. Wiring them needs new adapter
+        types, not registration. Tracked separately.
+      - task, file_watcher: wired under `daemon`,
+        which builds a SubAgentFactory.
+      - self_check: needs a model router.
+
+  * internal/cli/deps.go — wireAgentLoop merges
+    wireDocSetTools into the bus tool set. Already-wired
+    names win on collision, so a future rename elsewhere
+    cannot silently change what a name resolves to.
+
+  * internal/tools/bus.go — two fixes:
+
+    - Bus.Names() returns the sorted registered names.
+      This is what makes a wiring regression testable;
+      before it there was no way to assert the tool set.
+
+    - Dispatch dereferenced decision.Action without a
+      nil check. Decide returns (nil, err) when a rule's
+      approval template is malformed, so that path
+      panicked with a nil dereference instead of
+      surfacing the error. The error is now returned,
+      and a nil decision falls through to the tool.
+
+  * internal/cli/main.go, parser.go — new `aios tools`
+    subcommand listing every dispatchable tool name, one
+    per line, sorted. It does not go through BuildDeps,
+    so it works on a workspace with no config.yaml and no
+    audit.db — exactly the situation where a user is
+    trying to work out why a plan got ToolNotFoundError.
+
+Tests added (9):
+
+  * TestWireDocSetTools_ReturnsEveryTool — every name
+    present, map key equals tool.Name(), exact count.
+  * TestWireDocSetTools_NoNilTools — no typed-nil.
+  * TestBusDispatch_FindsWiredTools — a bus built from
+    the map resolves all 16 (not ToolNotFoundError).
+    This test is what caught the Dispatch nil
+    dereference above.
+  * TestBusNames_SortedAndComplete / _EmptyBus /
+    _MutatingResultIsSafe.
+  * TestRunTools_ListsEveryWiredTool — `aios tools`
+    names all 23 and the exact count is asserted, so a
+    tool silently dropped from the wiring fails the build.
+  * TestParse_Tools.
+
+Verified end to end: `aios tools` exits 0 and lists 23
+names; `aios run` on a two-task plan using `glob` and
+`git_status` exits 0 and writes two tool_call audit rows.
+Previously both tasks failed with ToolNotFoundError.
+
+Still unwired (libraries needing new adapter types, not
+just registration): benchmark, fanout, optimizer,
+persist, roles, memory.
+
+---
 v0.37.0 — run_tests tool: inherit the parent
 environment so `go test` (and friends) actually
 run

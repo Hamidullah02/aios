@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,6 +60,27 @@ func (b *Bus) Register(name string, tool Tool) {
 	b.tools[name] = tool
 }
 
+// Names returns the sorted names of every registered
+// tool.
+//
+// The method exists so the CLI can report the live tool
+// set (`aios tools`) and so a wiring regression is
+// testable: before v0.38.0 the edit / git / search /
+// image tools were implemented but never registered,
+// which no test could catch because nothing could ask
+// the bus what it had.
+//
+// Names returns a fresh slice; the caller may sort or
+// mutate it without affecting the bus.
+func (b *Bus) Names() []string {
+	out := make([]string, 0, len(b.tools))
+	for name := range b.tools {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Dispatch runs the tool call. The bus returns a Result and
 // an error. A successful call has OK=true and a nil error;
 // a policy-deny has OK=false and ErrPolicyDeny wrapped in
@@ -74,19 +96,38 @@ func (b *Bus) Dispatch(name string, args map[string]any, ctx Context) (Result, e
 	// circuit; "ask" surfaces to the operator (the doc set
 	// expects the worker to handle approvals; the bus
 	// rejects `ask` because it cannot wait synchronously).
+	//
+	// v0.38.0: the gateway is default-deny
+	// (REQ-POL-FUN-004) and always returns a decision on
+	// success, but Decide also returns (nil, err) when a
+	// rule's approval template is malformed. The old code
+	// read decision.Action unconditionally, so that error
+	// path panicked with a nil dereference instead of
+	// surfacing the error. A nil decision now falls
+	// through to the tool, matching how a nil policy is
+	// treated.
+	// The reason the gateway gave for an allow. Empty when
+	// there is no policy or no decision; the audit row
+	// carries it either way.
 	var policyReason string
 	if b.policy != nil {
-		decision, _ := b.policy.Decide(policy.NewCall(name, args, ctx.Actor, ctx.TaskID))
+		decision, policyErr := b.policy.Decide(policy.NewCall(name, args, ctx.Actor, ctx.TaskID))
+		if policyErr != nil {
+			_ = b.writeAudit(tool, args, ctx, "deny", policyErr.Error(), "", 0)
+			return Result{OK: false, Summary: "policy error"}, fmt.Errorf("tools: bus: policy: %w", policyErr)
+		}
 		if decision != nil {
 			policyReason = decision.Reason
 		}
-		switch decision.Action {
-		case policy.ActionDeny:
-			_ = b.writeAudit(tool, args, ctx, "deny", decision.Reason, "", 0)
-			return Result{OK: false, Summary: "denied: " + decision.Reason}, fmt.Errorf("tools: bus: %s denied by policy: %s", name, decision.Reason)
-		case policy.ActionAsk:
-			_ = b.writeAudit(tool, args, ctx, "ask", decision.Reason, "", 0)
-			return Result{OK: false, Summary: "ask: " + decision.Reason}, fmt.Errorf("tools: bus: %s requires approval: %s", name, decision.Reason)
+		switch {
+		case decision == nil:
+			// No decision: fall through to the tool.
+		case decision.Action == policy.ActionDeny:
+			_ = b.writeAudit(tool, args, ctx, "deny", policyReason, "", 0)
+			return Result{OK: false, Summary: "denied: " + policyReason}, fmt.Errorf("tools: bus: %s denied by policy: %s", name, policyReason)
+		case decision.Action == policy.ActionAsk:
+			_ = b.writeAudit(tool, args, ctx, "ask", policyReason, "", 0)
+			return Result{OK: false, Summary: "ask: " + policyReason}, fmt.Errorf("tools: bus: %s requires approval: %s", name, policyReason)
 		}
 	}
 

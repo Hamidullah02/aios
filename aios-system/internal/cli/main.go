@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // Main is the entry point the production binary calls. The
@@ -83,6 +84,8 @@ func RunCommand(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 		return runAudit(args, deps, stdout, stderr)
 	case CmdDaemon:
 		return runDaemon(ctx, args, deps, stderr)
+	case CmdTools:
+		return runTools(args, deps, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "cli: unknown subcommand %q\n", args.Command)
 		return ExitUserError
@@ -175,6 +178,41 @@ func runAudit(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, DisplayError(err, args.Debug))
 		return ExitCodeFor(err)
 	}
+	return ExitOK
+}
+
+// runTools lists every tool currently registered in the
+// bus. v0.38.0.
+//
+// The command reports the doc-set tool set the agent can
+// actually dispatch, which is the first thing to check
+// when a plan names a tool and gets ToolNotFoundError.
+// The list is sorted and one name per line so it pipes
+// into grep / comm without parsing.
+func runTools(args *Args, deps *Deps, stdout, stderr io.Writer) int {
+	// The tool set does not depend on the policy or the
+	// audit log, so we build it directly rather than
+	// going through BuildDeps. That keeps `aios tools`
+	// working on a workspace with no config.yaml and no
+	// audit.db, which is exactly the situation where a
+	// user is trying to figure out what went wrong.
+	names := make([]string, 0)
+	for name := range wireDocSetTools() {
+		names = append(names, name)
+	}
+	// The minimum five from wireAgentLoop plus the
+	// verify tools that always wire.
+	for name := range wireVerifyTools(nil, nil) {
+		names = append(names, name)
+	}
+	names = append(names,
+		"read_file", "search_files", "write_file", "run_shell", "ask_user",
+	)
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintln(stdout, name)
+	}
+	_ = stderr
 	return ExitOK
 }
 

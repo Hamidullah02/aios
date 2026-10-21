@@ -30,6 +30,13 @@ const (
 	CmdAudit  = "audit"
 	CmdInit   = "init"
 	CmdDaemon = "daemon"
+	// CmdTools lists the doc-set tools currently
+	// registered in the bus. v0.38.0: before this
+	// version the edit / git / search / image tools
+	// were implemented but never registered, so
+	// there was no way to discover the gap short of
+	// writing a TaskPlan and reading ToolNotFoundError.
+	CmdTools = "tools"
 )
 
 // DaemonSub is the sub-subcommand for the daemon. Per
@@ -165,6 +172,9 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 		sub.BoolVar(&a.Tail, "tail", false, "follow the audit log")
 	case CmdInit:
 		// init takes no sub-flags.
+	case CmdTools:
+		// no flags yet; reserved for future filters
+		// (e.g. --json, --package=git).
 	case CmdDaemon:
 		// The daemon command takes start or stop as a
 		// positional arg, not as a flag.
@@ -258,7 +268,7 @@ func findSubcommandIndex(argv []string) int {
 	known := map[string]bool{
 		CmdFix: true,
 		CmdRun: true, CmdResume: true, CmdCancel: true, CmdReport: true,
-		CmdAudit: true, CmdInit: true, CmdDaemon: true,
+		CmdAudit: true, CmdInit: true, CmdDaemon: true, CmdTools: true,
 	}
 	for i, a := range argv {
 		if strings.HasPrefix(a, "-") {

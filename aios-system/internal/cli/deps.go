@@ -297,6 +297,25 @@ func wireAgentLoop(deps *Deps, args *Args) error {
 	for name, tool := range verifyTools {
 		toolSet[name] = tool
 	}
+	// v0.38.0: the rest of the doc-set tool set. The
+	// five tools above are the REQ-DOC-MIN minimum; the
+	// edit / git / search / image packages each ship a
+	// working tools.Tool implementation that was never
+	// registered with the bus, so a plan naming one of
+	// them got ToolNotFoundError. wireDocSetTools closes
+	// that gap; see internal/cli/docset_wiring.go for the
+	// per-package notes and the deliberate exclusions.
+	docSetTools := wireDocSetTools()
+	for name, tool := range docSetTools {
+		// Never shadow a tool that is already wired.
+		// The verify set wins on a name collision so a
+		// future rename in another package cannot
+		// silently change what run_tests resolves to.
+		if _, exists := toolSet[name]; exists {
+			continue
+		}
+		toolSet[name] = tool
+	}
 	// Build the bus. The bus owns the tool map, the
 	// policy gateway, and the audit log. The gateway
 	// is required for the agent loop: without it the
