@@ -431,6 +431,14 @@ func TestResolveCommand(t *testing.T) {
 	if _, err := resolveCommand(map[string]any{"command": []any{"go", 1}}); err == nil {
 		t.Errorf("expected non-string error")
 	}
+	// v0.37.0: command may also be a single string
+	// (the bus worker passes "command=value" form,
+	// which becomes args["command"]="value").
+	if c, err := resolveCommand(map[string]any{"command": "go test -json"}); err != nil {
+		t.Fatalf("string command: %v", err)
+	} else if len(c) != 3 || c[0] != "go" {
+		t.Errorf("string command split: %v", c)
+	}
 	if _, err := resolveCommand(nil); err == nil {
 		t.Errorf("expected missing error")
 	}

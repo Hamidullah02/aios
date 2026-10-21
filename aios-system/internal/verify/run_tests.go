@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -129,6 +132,48 @@ type RunTestsTool struct {
 // Name returns the tool name.
 func (RunTestsTool) Name() string { return "run_tests" }
 
+// runTestsEnv is the per-tool environment the runner
+// uses for the child process. It overlays CI=1 on top
+// of the parent's environment (InheritEnv: true in
+// RunOptions) and forces HOME / USERPROFILE to a
+// writable directory.
+//
+// The HOME/USERPROFILE override is the v0.37.0 fix
+// for the "go test hangs forever" symptom: a parent
+// process (CI runner, system service) launched without
+// a HOME makes `go test` fall back to a path it cannot
+// write, and the run hangs for the full timeout instead
+// of failing fast. The verify package owns this fix
+// because the tool runs source the operator already
+// trusts (the model runner picks a tool at plan time).
+func runTestsEnv() map[string]string {
+	env := map[string]string{
+		"CI": "1",
+	}
+	// The os.TempDir fallback is the production
+	// safe-default: it always exists and is
+	// writable. The override makes `go test` use a
+	// known-good cache dir under the OS temp area.
+	cacheRoot := filepath.Join(os.TempDir(), "aios-verify-cache")
+	_ = os.MkdirAll(cacheRoot, 0o755)
+	if runtime.GOOS == "windows" {
+		env["USERPROFILE"] = cacheRoot
+		env["HOME"] = cacheRoot
+		// Go on Windows looks up %LocalAppData% when
+		// GOCACHE is unset. The build cache lives
+		// there by default; without this variable,
+		// `go test` errors with "build cache is
+		// required, but could not be located"
+		// and exits non-zero.
+		env["LOCALAPPDATA"] = cacheRoot
+		env["GOCACHE"] = filepath.Join(cacheRoot, "go-build")
+	} else {
+		env["HOME"] = cacheRoot
+		env["GOCACHE"] = filepath.Join(cacheRoot, "go-build")
+	}
+	return env
+}
+
 // Run executes the test command.
 func (t *RunTestsTool) Run(args map[string]any, ctx tools.Context) (tools.Result, error) {
 	command, err := resolveCommand(args)
@@ -142,6 +187,16 @@ func (t *RunTestsTool) Run(args map[string]any, ctx tools.Context) (tools.Result
 	if runner == "" {
 		runner = t.DefaultRunner
 	}
+	// v0.37.0: the optional `cwd` argument sets the
+	// working directory for the child process. The
+	// doc set's REQ-VRF-RNT-002 does not name a cwd
+	// argument, but without one the tool inherits the
+	// aios process's directory, so a plan that says
+	// `go test ./...` tests whatever module the
+	// binary happened to be started in rather than the
+	// project the plan targets. When `cwd` is empty
+	// the previous behaviour (inherit) is preserved.
+	cwd := stringArg(args, "cwd")
 	if runner == "" {
 		runner = RunnerGoTest
 	}
@@ -164,8 +219,27 @@ func (t *RunTestsTool) Run(args map[string]any, ctx tools.Context) (tools.Result
 	start := now()
 	res, runErr := t.Sandbox.Run(sandbox.RunOptions{
 		Command: command,
-		Env:     map[string]string{"CI": "1"},
-		Timeout: timeout,
+		Cwd:     cwd,
+		// Test runners need PATH to find the toolchain
+		// (`go`, `npm`, `cargo`) and a writable HOME /
+		// cache dir for their module and build caches.
+		// The default sandbox isolation
+		// (REQ-SND-ISO-002) would clear the env and only
+		// set CI=1, which silently breaks `go test` and
+		// friends. We opt in to env inheritance here
+		// because the tool runs source the operator
+		// already trusts.
+		//
+		// On top of inheritance we force HOME and
+		// USERPROFILE to a writable directory. A parent
+		// process launched from a service manager (or a
+		// test harness) frequently has no HOME at all,
+		// and `go test` then tries to create its build
+		// cache under a path it cannot write, which
+		// hangs rather than failing fast.
+		InheritEnv: true,
+		Env:        runTestsEnv(),
+		Timeout:    timeout,
 	})
 	duration := elapsedMs(start)
 	// Even when the command failed (non-zero
@@ -234,11 +308,11 @@ func testResultOutput(r TestResult) map[string]any {
 }
 
 // resolveCommand accepts the args as either
-// `command: []any` or `test_command: "go
-// test ./..."`. The single-string form is
-// split on whitespace (the test set confirms
-// this is enough for the doc-set command
-// examples).
+// `command: []any`, `command: "..."` (single string,
+// split on whitespace), or `test_command: "..."`. The
+// single-string forms are a convenience; callers that
+// need arguments with embedded spaces should use the
+// list form.
 func resolveCommand(args map[string]any) ([]string, error) {
 	if list, ok := args["command"].([]any); ok && len(list) > 0 {
 		out := make([]string, 0, len(list))
@@ -251,11 +325,10 @@ func resolveCommand(args map[string]any) ([]string, error) {
 		}
 		return out, nil
 	}
+	if raw, ok := args["command"].(string); ok && raw != "" {
+		return strings.Fields(raw), nil
+	}
 	if single := stringArg(args, "test_command"); single != "" {
-		// Split on whitespace. The single-string
-		// form is a convenience; callers that
-		// need arguments with spaces should use
-		// the list form.
 		return strings.Fields(single), nil
 	}
 	return nil, &TestRunnerError{Op: "resolve", Reason: "command (or test_command) is required"}

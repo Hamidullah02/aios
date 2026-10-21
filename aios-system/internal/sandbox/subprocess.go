@@ -56,6 +56,21 @@ func NewSubprocessRunnerWithClock(now func() time.Time) *SubprocessRunner {
 	return &SubprocessRunner{now: now}
 }
 
+// formatEnv converts an Env map into the []string form
+// os/exec.Cmd.Env expects. The order is non-deterministic
+// (Go map iteration); RunOptions.InheritEnv callers should
+// not rely on a specific ordering.
+func formatEnv(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
 // RunOptions is the input to SubprocessRunner.Run.
 //
 // The Command is required. The Env is the allow-list of
@@ -69,9 +84,26 @@ func NewSubprocessRunnerWithClock(now func() time.Time) *SubprocessRunner {
 type RunOptions struct {
 	Command []string
 	Env     map[string]string
-	Cwd     string
-	Timeout int
-	Limits  *ResourceLimits
+	// InheritEnv starts the subprocess environment from
+	// the parent's os.Environ() and overlays Env on top.
+	// The default (false) keeps REQ-SND-ISO-002 intact:
+	// the child gets ONLY the variables in Env, with no
+	// parent variables leaking through.
+	//
+	// Some callers genuinely need the parent
+	// environment. The run_tests tool is the canonical
+	// example: `go test`, `npm test`, and `cargo test`
+	// all need PATH to find the toolchain, plus HOME /
+	// USERPROFILE for their caches. Those tools run
+	// against source the operator already trusts, so
+	// inheriting the environment is the right trade.
+	//
+	// run_shell keeps the default (false) because it
+	// executes arbitrary commands.
+	InheritEnv bool
+	Cwd        string
+	Timeout    int
+	Limits     *ResourceLimits
 }
 
 // DefaultTimeout is the default wall-clock timeout when
@@ -196,11 +228,14 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 	}
 	// REQ-SND-ISO-002: clear the environment; set only the
 	// allowed variables. A nil Env means an empty
-	// environment.
-	env := make([]string, 0, len(opts.Env))
-	for k, v := range opts.Env {
-		env = append(env, k+"="+v)
+	// environment. When InheritEnv is set, the parent's
+	// environment is the starting point and Env is
+	// overlaid on top.
+	var env []string
+	if opts.InheritEnv {
+		env = os.Environ()
 	}
+	env = append(env, formatEnv(opts.Env)...)
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer

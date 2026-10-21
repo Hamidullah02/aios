@@ -1,4 +1,91 @@
 # Changelog
+v0.37.0 — run_tests tool: inherit the parent
+environment so `go test` (and friends) actually
+run
+
+The v0.35.0 wiring made the verify tool reachable
+from `aios run`, but every real invocation failed.
+The tool passed `Env: {"CI": "1"}` to the sandbox
+runner, and the runner implements REQ-SND-ISO-002
+by clearing the child environment and setting only
+the allow-list. The child therefore had:
+
+  - no PATH, so `go` / `npm` / `cargo` could not be
+    found at all,
+  - no HOME / USERPROFILE, so the toolchains had
+    nowhere to put their caches,
+  - on Windows, no %LocalAppData% and no GOCACHE,
+    which makes `go test` exit with "build cache is
+    required, but could not be located".
+
+Every `run_tests` task therefore failed, and a plan
+that depended on one could never complete.
+
+Three fixes, each in the layer that owns the
+decision:
+
+  * internal/sandbox/subprocess.go — RunOptions
+    gains InheritEnv (default false). When true the
+    child environment starts from os.Environ() and
+    Env is overlaid on top. The default is unchanged,
+    so run_shell keeps full isolation (REQ-SND-ISO-002
+    still holds); only callers that opt in get
+    inheritance.
+
+  * internal/verify/run_tests.go — the tool opts in
+    (InheritEnv: true) and its own env overlay
+    (runTestsEnv) forces HOME, USERPROFILE,
+    LOCALAPPDATA and GOCACHE to a writable directory
+    under os.TempDir(). The overlay exists because a
+    parent launched by a service manager or CI agent
+    frequently has no HOME at all, and `go test` then
+    picks a path it cannot write and hangs for the
+    full timeout instead of failing fast.
+
+  * internal/verify/run_tests.go — two arg gaps that
+    the first working run exposed:
+      - `cwd` (string, optional) sets the working
+        directory. Without it the tool inherited the
+        aios process's directory, so a plan saying
+        `go test ./...` tested whichever module the
+        binary happened to start in. REQ-VRF-RNT-002
+        does not name a cwd argument; this is a
+        deliberate extension.
+      - `command` now also accepts a single string and
+        splits it on whitespace. The bus worker turns a
+        plan's `command=go test ./...` input into a
+        plain string, which the list-only resolver
+        rejected outright with "command (or
+        test_command) is required".
+
+Tests added (9):
+
+  * internal/sandbox/inherit_env_test.go
+    (TestHelperPrintEnv, TestInheritEnv_DefaultIsolated,
+    TestInheritEnv_TrueSeesParentEnv,
+    TestInheritEnv_OverlayWins, TestFormatEnv) — the
+    default stays isolated, inheritance works, and an
+    explicit Env entry beats the inherited value.
+
+  * internal/verify/run_tests_e2e_test.go
+    (TestRunTestsTool_RunsGoTest, TestRunTestsTool_SetsCI)
+    — the gate. The first builds a real Go module in a
+    tempdir and dispatches `go test -json .` through the
+    production sandbox runner, asserting Result.OK ==
+    true and TestResult.Passed >= 1 plus a run_tests
+    audit row. Before this version the same dispatch
+    timed out at 60s.
+
+  * internal/verify/run_tests_test.go — TestResolveCommand
+    extended to cover the new single-string `command`
+    form.
+
+Verified end to end: `aios run` on a one-task plan
+calling `run_tests` with
+`command=go test -json -count=1 ./internal/verify/`
+now exits 0 in ~2.8s and writes two tool_call rows.
+
+---
 v0.36.0 — fix the policy template + load policy
 from <config-dir>/policy.yaml
 
