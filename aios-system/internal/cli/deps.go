@@ -160,12 +160,21 @@ func BuildDeps(args *Args) (*Deps, error) {
 	// is a hard error. The init and daemon subcommands
 	// are exempt: they create the policy file (init) or
 	// wire the daemon before policy validation runs.
+	//
+	// The policy is loaded from `policy.yaml` next to
+	// the `--config` file (the canonical layout `aios
+	// init` scaffolds). If `args.ConfigPath` already
+	// points at a policy file (test compat / operator
+	// override), the policyPath resolver returns it
+	// unchanged.
 	if !requiresPolicy(args.Command) {
 		// Bootstrap path: try to load a policy if one
 		// exists, but do not require it.
 		if args.ConfigPath != "" {
-			if rules, perr := policy.Load(args.ConfigPath); perr == nil {
-				deps.Policy = policy.New(rules, deps.Audit)
+			if ppath, perr := policyPath(args.ConfigPath); perr == nil {
+				if rules, perr := policy.Load(ppath); perr == nil {
+					deps.Policy = policy.New(rules, deps.Audit)
+				}
 			}
 		}
 	} else {
@@ -175,7 +184,15 @@ func BuildDeps(args *Args) (*Deps, error) {
 				What: "policy file is required (use --config)",
 			}
 		}
-		rules, perr := policy.Load(args.ConfigPath)
+		ppath, err := policyPath(args.ConfigPath)
+		if err != nil {
+			return nil, &CliError{
+				Kind:  "config",
+				What:  "policy path resolution failed",
+				Cause: err,
+			}
+		}
+		rules, perr := policy.Load(ppath)
 		if perr != nil {
 			// Policy load failed; close the audit log so
 			// we do not leak an open file handle (which
@@ -184,7 +201,7 @@ func BuildDeps(args *Args) (*Deps, error) {
 			_ = deps.Close()
 			return nil, &CliError{
 				Kind:  "config",
-				What:  fmt.Sprintf("policy load failed: %s", args.ConfigPath),
+				What:  fmt.Sprintf("policy load failed: %s", ppath),
 				Cause: perr,
 			}
 		}

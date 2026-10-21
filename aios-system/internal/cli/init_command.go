@@ -84,16 +84,32 @@ func PrintInitReport(w interface{ Write([]byte) (int, error) }, created, existed
 
 const defaultPolicyYAML = `# aios default policy. REQ-POL-DAT-001.
 # Deny-by-default. Allow common read-only operations.
+# Every rule has an "id" (required by the policy
+# validator), a "match" block, and an "action". The
+# "ask" rule carries an "approval" template so the
+# approval daemon knows what to bind.
 default: deny
 rules:
-  - tool: read_file
+  - id: allow-read
+    match:
+      tool: read_file
     action: allow
-  - tool: search_files
+  - id: allow-search
+    match:
+      tool: search_files
     action: allow
-  - tool: run_shell
+  - id: ask-shell
+    match:
+      tool: run_shell
     action: ask
     reason: shell access is gated by the approval daemon
-  - tool: ask_user
+    approval:
+      action: shell
+      resource: "{command}"
+      reason: "run a shell command"
+  - id: allow-ask-user
+    match:
+      tool: ask_user
     action: allow
 `
 

@@ -1,4 +1,61 @@
 # Changelog
+v0.36.0 — fix the policy template + load policy
+from <config-dir>/policy.yaml
+
+The v0.32.0 CLI shipped two wiring bugs that
+surfaced whenever a user ran `aios init` and
+then `aios run` without editing any file:
+
+  1. defaultPolicyYAML wrote rules without
+     `id`. The policy validator rejects rules
+     without an id, so policy.Load returned
+     RuleValidationError and the bus never got
+     its gateway. A user who relied on the
+     scaffolded policy.yaml saw every tool
+     call default-deny.
+
+  2. BuildDeps called policy.Load on
+     args.ConfigPath, which is the config file,
+     not the policy file. config.yaml has no
+     `rules:` block; the loader returned an
+     empty list; the bus ran with no allow
+     rules; the first tool call denied.
+
+This version closes both:
+
+  * internal/cli/init_command.go:
+    defaultPolicyYAML now writes rules in the
+    canonical shape (id, match block, action,
+    optional approval template with all three
+    fields). The scaffolded policy is valid
+    against policy.Load + Rule.Validate.
+
+  * internal/cli/policy_path.go (new):
+    policyPath helper resolves the policy file
+    from --config:
+      - if --config points at policy.yaml,
+        use it (operator override / tests),
+      - otherwise look for a sibling
+        policy.yaml next to --config,
+      - falling back to --config itself if no
+        sibling exists.
+
+  * internal/cli/deps.go: BuildDeps uses
+    policyPath, so `aios init && aios run`
+    now finds the canonical policy without
+    the user editing anything.
+
+Tests: 8 new (TestPolicyPath_* x4,
+TestDefaultPolicyYAML_ParsesAndValidates,
+TestInit_DefaultPolicyValidates,
+TestBuildDeps_FindsPolicyNextToConfig,
+TestMain_InitThenRunHappyPath). All 30
+packages green; go vet clean; gofmt -l . clean.
+
+Smoke: aios init && aios run var/plans/x.yaml
+succeeds end-to-end with no manual config
+edits (live run, exit 0, one tool_call audit
+row).
 
 
 v0.35.0 — verify tools wired into the bus
