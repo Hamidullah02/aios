@@ -84,6 +84,27 @@ type Args struct {
 //
 // Per REQ-CLI-FST-003 the parser uses the Go stdlib flag
 // package. The doc set says argparse, which is the Python
+// DefaultLogPath is the audit-log path used when the
+// operator passes no --log flag.
+//
+// v0.40.2: this used to be "./var/aios.log", which was
+// misleading twice over. It is a sqlite3 database, not a
+// text log, and the BuildDeps fallback in deps.go named a
+// DIFFERENT default ("./var/aios.db") for the same file.
+// Because the parser always populates LogPath, the deps.go
+// fallback could never run, so the two defaults disagreed
+// on paper while only the parser's was reachable -- and the
+// name an operator saw in `--help` was the wrong one.
+//
+// The default is relative, so it resolves against the
+// working directory like every other default here.
+// Explicitly naming it as a constant keeps BuildDeps and
+// the parser in agreement and lets tests assert the exact
+// path instead of reconstructing it.
+const DefaultLogPath = "./var/aios.db"
+
+// Parse turns argv into an *Args. The function writes usage
+// and parse errors to w and returns them as errors. An
 // equivalent.
 func Parse(argv []string, w io.Writer) (*Args, error) {
 	if len(argv) == 0 {
@@ -94,7 +115,7 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	fs.SetOutput(w)
 	fs.BoolVar(&a.Debug, "debug", false, "print the full error traceback on failure")
 	fs.StringVar(&a.ConfigPath, "config", "./var/config.yaml", "path to the config file")
-	fs.StringVar(&a.LogPath, "log", "./var/aios.log", "path to the log file")
+	fs.StringVar(&a.LogPath, "log", DefaultLogPath, "path to the audit log database")
 	fs.StringVar(&a.Workspace, "workspace", "", "tool-bus workspace root; default = dirname of --config")
 	fs.StringVar(&a.SocketPath, "socket", "/tmp/aios-approval.sock", "approval daemon socket path")
 	fs.StringVar(&a.DaemonPID, "pidfile", "./var/aios-daemon.pid", "path to the daemon pid file")
@@ -316,7 +337,7 @@ Subcommands:
 Global flags:
   --debug                Print the full error traceback on failure.
   --config=path          Config file (default: ./var/config.yaml).
-  --log=path             Log file (default: ./var/aios.log).
+  --log=path             Audit log database (default: ./var/aios.db).
   --socket=path          Approval daemon socket (default: /tmp/aios-approval.sock).
   --pidfile=path         Daemon pid file (default: ./var/aios-daemon.pid).
   --format=fmt           Report format (default: json).

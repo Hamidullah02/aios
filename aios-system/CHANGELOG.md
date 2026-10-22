@@ -1,4 +1,50 @@
 # Changelog
+v0.40.2 — one audit-log default instead of two
+
+The default audit-log path was written down twice and the
+two copies disagreed.
+
+  - parser.go defaulted `--log` to `./var/aios.log`
+  - deps.go fell back to `./var/aios.db`
+
+Because `Parse` always populates `args.LogPath`, the
+`if args.LogPath != ""` branch in `BuildDeps` could never
+be false for any invocation that came through the CLI. The
+deps.go fallback was dead code, the two defaults disagreed
+on paper while only one was reachable, and the name an
+operator read in `--help` was the wrong one for a sqlite3
+database.
+
+Both now read a single exported constant,
+`cli.DefaultLogPath = "./var/aios.db"`. The `--help` text
+says "Audit log database (default: ./var/aios.db)" instead
+of "Log file (default: ./var/aios.log)".
+
+Worth stating plainly, because the premise this was filed
+under was wrong: **the audit log was never in-memory.**
+The default is an on-disk sqlite3 file, both before and
+after this change, and a run with no `--log` flag already
+persisted its rows and `aios audit` with no `--log` already
+read them back. Verified live: `aios run` with no `--log`
+produces a real database at the default path whose
+tool_call row a later `aios audit` finds.
+
+What was real is the double default and the misleading
+name, and both are now fixed rather than papered over.
+
+Tests added (5): the constant exists, is a `.db`, and does
+not say `.log`; the parser default equals the constant; an
+explicit `--log` still wins; the `--help` text names the
+real default and no longer mentions the stale one; and a
+programmatic-`Args` `BuildDeps` call opens a real file at
+the default path.
+
+Note for future tests: this module is on Go 1.23, so
+`t.Chdir` (Go 1.24) is unavailable. The one test that needs
+a different working directory saves and restores it via
+`os.Getwd` plus `t.Cleanup`.
+
+---
 v0.40.1 — `aios audit` explains an empty result
 
 `aios audit --task=no-such-task` printed nothing at all

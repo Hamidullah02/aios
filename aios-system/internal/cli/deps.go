@@ -136,7 +136,13 @@ func BuildDeps(args *Args) (*Deps, error) {
 	// before the audit log exists. A failure to open the
 	// audit log is a hard error for non-bootstrap
 	// subcommands.
-	auditPath := "./var/aios.db"
+	//
+	// The default is DefaultLogPath (see parser.go). Both
+	// live in one constant because the parser always
+	// populates args.LogPath, so the fallback below is only
+	// reachable when a caller builds Args programmatically
+	// rather than through Parse.
+	auditPath := DefaultLogPath
 	if args.LogPath != "" {
 		auditPath = args.LogPath
 	}
