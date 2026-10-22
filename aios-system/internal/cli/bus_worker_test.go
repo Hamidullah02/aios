@@ -81,14 +81,20 @@ func TestBusWorker_EndToEnd(t *testing.T) {
 		t.Errorf("expected tool_call row for t1, got: %v", kindsOf(taskRows))
 	}
 	// The chain is global (sequence_number is per-log, not
-	// per-task), so a per-task query returns a sub-chain
-	// whose prev_hash points at a row outside the slice.
-	// The hash chain is verified by reading the whole log
-	// and sorting by sequence_number.
-	allRows := mustGetByKind(log, "tool_call", 100)
-	allRows = append(allRows, mustGetByKind(log, "policy_decision", 100)...)
-	allRows = append(allRows, mustGetByKind(log, "decision", 100)...)
-	sortBySeq(allRows)
+	// per-task), and every row links to the one before it,
+	// whatever its kind. So the chain can only be verified
+	// over the COMPLETE log: selecting a subset of kinds
+	// skips rows the hash still depends on and yields a
+	// spurious mismatch.
+	//
+	// v0.41.0 added task_started / task_passed rows, which
+	// is what surfaced this: the old filter listed three
+	// kinds and silently dropped the new ones, so VerifyChain
+	// saw row 2's prev_hash pointing at a row it did not
+	// have. Every kind the orchestrator or bus writes must
+	// be listed here; a new kind that is forgotten will fail
+	// this test loudly, which is the intended alarm.
+	allRows := mustGetAllRows(t, log)
 	if v := audit.VerifyChain(allRows); !v.OK {
 		t.Errorf("global chain invalid: %s (rows=%d)", v.Reason, len(allRows))
 	}
@@ -272,6 +278,44 @@ func kindsOf(rows []audit.PersistedRow) []string {
 // handles the empty input correctly.
 func mustGetByKind(log *audit.Log, kind string, limit int) []audit.PersistedRow {
 	rows, _ := log.GetByKind(kind, limit)
+	return rows
+}
+
+// auditChainKinds is every row kind the orchestrator and the
+// bus write in a plain run.
+//
+// VerifyChain hashes each row against its predecessor, so a
+// chain check that omits a kind is checking a fiction. This
+// list must be kept complete: a new kind that is not added
+// here makes the end-to-end chain tests fail, which is the
+// alarm working as intended rather than a false pass.
+var auditChainKinds = []string{
+	"tool_call",
+	"policy_decision",
+	"decision",
+	"task_started", // v0.41.0
+	"task_passed",  // v0.41.0
+}
+
+// mustGetAllRows returns every row in the log, in chain
+// order.
+func mustGetAllRows(t *testing.T, log *audit.Log) []audit.PersistedRow {
+	t.Helper()
+	seen := make(map[int64]bool)
+	var rows []audit.PersistedRow
+	for _, kind := range auditChainKinds {
+		got, err := log.GetByKind(kind, 1000)
+		if err != nil {
+			t.Fatalf("GetByKind(%q): %v", kind, err)
+		}
+		for _, r := range got {
+			if !seen[r.SequenceNumber] {
+				seen[r.SequenceNumber] = true
+				rows = append(rows, r)
+			}
+		}
+	}
+	sortBySeq(rows)
 	return rows
 }
 

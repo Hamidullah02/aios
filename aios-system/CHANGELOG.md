@@ -1,4 +1,135 @@
 # Changelog
+v0.41.0 — embedded web UI: multi-agent panels, panel
+customisation, agent communication
+
+`aios web` serves an operator UI that is compiled **into the
+binary**. There is no sidecar asset directory, no npm, no
+build step, and nothing fetched at runtime: the HTML, CSS,
+and JS are embedded with `go:embed` and served from memory.
+This is the shape the "included in the binary" requirement
+demands, and it also means the UI cannot drift out of sync
+with the binary that serves it.
+
+Four pieces:
+
+**1. Embedded assets + server** (`internal/webui/server.go`).
+Loopback-only by default (`127.0.0.1:7755`). The UI exposes
+the audit log, so binding a network interface by default
+would be a security decision made silently; a remote operator
+must forward the port deliberately. SSE for the live stream
+rather than a websocket, because the data flow is one-way
+and SSE reconnects on its own; the one client-to-server
+action is a plain POST.
+
+**2. State hub** (`internal/webui/hub.go`). In-memory
+registry of agents and messages, safe for concurrent use,
+with bounded history and drop-on-full subscribers. Dropping
+is the deliberate trade: the UI re-syncs from a snapshot on
+reconnect, so a missed frame costs a frame, not correctness.
+A slow browser must never stall the orchestrator.
+
+**3. Runtime observer** (`internal/runtime/observer.go`).
+The orchestrator publishes task lifecycle events to an
+`Observer` interface. The direction matters: runtime defines
+the interface, webui implements it. If runtime knew about
+the UI, every future viewer (a TUI, a metrics exporter)
+would need a runtime change. Observers are called inline on
+the task loop, so implementations must be non-blocking.
+
+Events fire **after** the checkpoint is durable, so a live
+view never shows a task as done that a crash could roll back.
+
+**4. Panel layout** (`internal/webui/layout.go`). Per-operator
+customisation: show/hide, drag-to-reorder, and width in grid
+columns, plus theme and a compact mode. Validated on write,
+with asymmetric strictness:
+
+- a **missing** panel is added back with defaults, so a
+  layout saved before a panel existed keeps working;
+- an **unknown** panel is an error, because silently
+  dropping it would hide the operator's typo;
+- an out-of-range **width** is clamped rather than
+  rejected, so a mis-drag does not lose every other correct
+  setting.
+
+The layout lives server-side so every open tab agrees.
+
+**Agent communication**: a bounded mailbox with directed
+messages and broadcasts. Addressing an unknown agent is a
+`400`, not a silent drop — a typo must not look like a
+delivered handoff. Message bodies are rendered with
+`textContent`, never `innerHTML`, so agent- and
+operator-supplied text is never parsed as markup. The docs
+are explicit that delivery is **not** an execution guarantee:
+nothing in the runtime consumes a message yet, so the UI
+labels these "sent", not "delivered". That honesty is the
+point — presenting a log that looks like a working agent
+channel would be the more impressive and less true option.
+
+### Two defects found and fixed while building this
+
+- **The orchestrator wrote no task-scoped lifecycle rows.** A
+  task that ran a tool but was still running, or that
+  finished with no tool call, left no trace at all, so a
+  freshly-started UI showed nothing for it. `writeStateRow`
+  is keyed by **plan** id (that is what `aios resume`
+  reads); `writeTaskRow` is new, keyed by **task** id (that
+  is what a panel needs). The two answer different questions
+  and conflating them made the history unusable.
+
+- **`Agent.TaskCount` advanced on every status change**, so a
+  task that went running → done counted twice and the UI
+  reported double the work done. It now advances only on a
+  transition *into* running, which is what "tasks started"
+  means.
+
+### Why the chain tests broke
+
+Adding the lifecycle rows also broke two end-to-end chain
+tests, and the cause is worth recording: `VerifyChain` hashes
+each row against its predecessor, so a chain check that reads
+a **subset** of kinds is checking a fiction. Both tests
+selected three kinds by hand and silently omitted the two new
+ones, so row 2's `prev_hash` pointed at a row they did not
+have. Both now assemble every row the orchestrator and bus
+write, and the kind list is a named constant so a future kind
+that is forgotten fails loudly instead of passing quietly.
+
+### Security notes
+
+Loopback-only bind; request body caps on every mutating
+endpoint (64 KB messages, 8 KB status); a 32-panel cap
+bounding operator input before it reaches a loop; and no
+authority in the UI beyond reading state and posting
+messages — it cannot start or stop a plan, so it cannot do
+anything the policy gateway would have denied.
+
+### Tests
+
+47 new across three packages. `webui` covers asset embedding,
+SPA fallback, every API endpoint and its validation, layout
+normalisation edge cases, hub concurrency, SSE snapshot +
+deltas, and the bridge's state mapping (including
+awaiting-approval rendering as **blocked** rather than
+failed, because the operator's next action is to grant it,
+not to investigate a fault). `runtime` covers the observer
+across the success, worker-error, awaiting-approval, and
+budget-exhausted paths.
+
+### Verified live
+
+`aios run` on a two-task plan exits 0, then `aios web`
+reports the history back over `/api/state` as `t1: done,
+t2: done` — the backfill path, end to end, against a real
+audit log.
+
+> **Note**: `-race` could not be run in this environment (the
+> project is `CGO_ENABLED=0` for the pure-Go sqlite driver,
+> and no C compiler is available to enable it). The
+> concurrency tests are written to be meaningful under
+> `-race` and are committed for CI.
+
+---
 v0.40.3 — a nil var leaf is unresolved, not an empty
 string
 

@@ -1,0 +1,251 @@
+/* aios web UI.
+ *
+ * Two themes driven by one set of custom properties.
+ * `data-theme` on <html> is "auto" (follow the OS),
+ * "dark", or "light"; auto resolves through the media
+ * query so the operator never has to pick. The inline
+ * script-free approach means the first paint is correct
+ * without a flash of the wrong theme.
+ */
+
+:root {
+  --bg: #0f1115;
+  --surface: #161a21;
+  --surface-2: #1d222b;
+  --border: #262c37;
+  --text: #e6e9ef;
+  --muted: #8b94a7;
+  --accent: #5b9dff;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f85149;
+  --radius: 8px;
+  --gap: 12px;
+}
+
+html[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f6f7f9;
+  --surface-2: #eceef2;
+  --border: #d8dce3;
+  --text: #1a1d23;
+  --muted: #5c6472;
+}
+
+@media (prefers-color-scheme: light) {
+  html[data-theme="auto"] {
+    --bg: #ffffff;
+    --surface: #f6f7f9;
+    --surface-2: #eceef2;
+    --border: #d8dce3;
+    --text: #1a1d23;
+    --muted: #5c6472;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---- top bar ---- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .02em; }
+.spacer { flex: 1; }
+.controls { display: flex; gap: 8px; }
+
+.status {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.status[data-state="live"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.status[data-state="lost"] { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, var(--border)); }
+
+.btn {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 11px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---- layout editor ---- */
+
+.editor {
+  padding: 14px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.editor h2 { margin: 0 0 4px; font-size: 14px; }
+.hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+
+.panel-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.panel-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+.panel-list li.dragging { opacity: .5; }
+.panel-list li.drop-target { border-color: var(--accent); }
+.panel-list .name { flex: 1; }
+.panel-list input[type="range"] { width: 120px; }
+
+.editor-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.editor-row label { color: var(--muted); font-size: 13px; }
+.save-state { color: var(--muted); font-size: 12px; margin: 10px 0 0; min-height: 1em; }
+
+/* ---- grid ---- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: var(--gap);
+  padding: var(--gap);
+  align-items: start;
+}
+.grid.compact { gap: 8px; padding: 8px; }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* A panel can be shorter than its content; cap it so one
+     noisy panel cannot push everything below the fold. */
+  max-height: 70vh;
+}
+.grid.compact .panel { max-height: 60vh; }
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.panel-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.panel-head .count { color: var(--muted); font-size: 12px; }
+
+.panel-body { overflow: auto; padding: 10px 12px; flex: 1; }
+.empty { color: var(--muted); margin: 4px 0; font-size: 13px; }
+
+/* ---- agent cards ---- */
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+.grid.compact .agent-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+
+.agent {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 6px;
+  padding: 9px 10px;
+}
+.agent header { display: flex; align-items: center; gap: 7px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.agent-label { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.agent-tool { color: var(--muted); font-size: 12px; margin-top: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.agent-detail { margin: 5px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+
+.agent[data-status="running"] { border-left-color: var(--accent); }
+.agent[data-status="running"] .dot { background: var(--accent); animation: pulse 1.3s ease-in-out infinite; }
+.agent[data-status="blocked"] { border-left-color: var(--warn); }
+.agent[data-status="blocked"] .dot { background: var(--warn); }
+.agent[data-status="done"] { border-left-color: var(--ok); }
+.agent[data-status="done"] .dot { background: var(--ok); }
+.agent[data-status="failed"] { border-left-color: var(--err); }
+.agent[data-status="failed"] .dot { background: var(--err); }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* Respect the OS preference: a running dot must not keep
+   animating for an operator who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .agent[data-status="running"] .dot { animation: none; }
+  * { scroll-behavior: auto !important; }
+}
+
+/* ---- communication log ---- */
+
+.comms { display: flex; flex-direction: column; gap: 8px; }
+
+.msg { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; background: var(--surface-2); }
+.msg-head { display: flex; gap: 6px; align-items: baseline; font-size: 12px; margin-bottom: 3px; flex-wrap: wrap; }
+.msg-from { font-weight: 600; }
+.msg-to, .msg-kind, .msg-at { color: var(--muted); }
+.msg-body { margin: 0; font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+.msg.broadcast { border-left: 3px solid var(--accent); }
+
+.compose {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 7px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.compose select, .compose input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  min-width: 0;
+}
+
+/* ---- activity ---- */
+
+.audit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.audit-row { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+.audit-row:last-child { border-bottom: 0; }
+.audit-agent { color: var(--accent); flex: none; min-width: 44px; }
+.audit-text { color: var(--muted); overflow-wrap: anywhere; }
+
+/* ---- narrow screens ---- */
+
+@media (max-width: 720px) {
+  /* Every panel goes full width; the grid columns become
+     meaningless below this point and squeezing three of
+     them into a phone is worse than stacking. */
+  .panel { grid-column: 1 / -1 !important; }
+  .compose { grid-template-columns: 1fr; }
+}

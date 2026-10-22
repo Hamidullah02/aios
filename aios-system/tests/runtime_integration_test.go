@@ -68,13 +68,63 @@ func TestRuntime_Orchestrator_EndToEnd(t *testing.T) {
 	}
 
 	// Verify the audit chain.
-	rows, _ := log.GetByTask("p1")
+	//
+	// The chain is global and links every row to its
+	// predecessor regardless of kind or task, so it can only
+	// be verified over the COMPLETE log. v0.41.0 added
+	// task-scoped task_started / task_passed rows alongside
+	// the plan-scoped ones, which makes a per-task slice a
+	// non-contiguous view of the chain: row 2's prev_hash
+	// points at a task-scoped row this query does not return.
+	rows := allAuditRows(t, log)
 	if len(rows) < 3 {
 		t.Fatalf("audit rows = %d, want >= 3", len(rows))
 	}
 	if v := audit.VerifyChain(rows); !v.OK {
 		t.Fatalf("chain invalid: %s", v.Reason)
 	}
+}
+
+// allAuditRows returns every row in the log in chain order.
+//
+// The kind list must stay complete: VerifyChain hashes each
+// row against its predecessor, so omitting a kind checks a
+// fiction. A newly added kind that is forgotten here fails
+// this test, which is the alarm working rather than a false
+// pass.
+func allAuditRows(t *testing.T, log *audit.Log) []audit.PersistedRow {
+	t.Helper()
+	kinds := []string{
+		"task_started", // v0.41.0
+		"task_passed",  // v0.41.0
+		"task_failed",
+		"task_paused",
+		"task_awaiting_approval",
+		"task_cancelled",
+		"policy_decision",
+		"decision",
+		"tool_call",
+	}
+	seen := make(map[int64]bool)
+	var rows []audit.PersistedRow
+	for _, kind := range kinds {
+		got, err := log.GetByKind(kind, 1000)
+		if err != nil {
+			t.Fatalf("GetByKind(%q): %v", kind, err)
+		}
+		for _, r := range got {
+			if !seen[r.SequenceNumber] {
+				seen[r.SequenceNumber] = true
+				rows = append(rows, r)
+			}
+		}
+	}
+	for i := 1; i < len(rows); i++ {
+		for j := i; j > 0 && rows[j-1].SequenceNumber > rows[j].SequenceNumber; j-- {
+			rows[j-1], rows[j] = rows[j], rows[j-1]
+		}
+	}
+	return rows
 }
 
 type approvalWorker struct{}

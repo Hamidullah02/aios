@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/sadi/aios-system/internal/webui"
 )
 
 // Subcommand is the set of supported subcommands. The list is
@@ -30,6 +32,10 @@ const (
 	CmdAudit  = "audit"
 	CmdInit   = "init"
 	CmdDaemon = "daemon"
+	// CmdWeb serves the operator UI from the binary.
+	// v0.41.0: the UI is embedded via go:embed, so this
+	// needs no sidecar assets, no npm, and no network.
+	CmdWeb = "web"
 	// CmdTools lists the doc-set tools currently
 	// registered in the bus. v0.38.0: before this
 	// version the edit / git / search / image tools
@@ -72,6 +78,8 @@ type Args struct {
 	Objective  string // the natural-language goal for `fix`
 	Model      string // model id override for `fix` and `run` (default: planner picks)
 	PlanOut    string // path to write the planner's plan (for `fix`); empty = no write
+	WebAddr    string // listen address for `web` (default: webui.DefaultAddr)
+	WebOpen    bool   // `web --open`: print the URL and exit without serving
 }
 
 // Parse parses argv into Args. argv[0] is the program name
@@ -193,6 +201,9 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 		sub.BoolVar(&a.Tail, "tail", false, "follow the audit log")
 	case CmdInit:
 		// init takes no sub-flags.
+	case CmdWeb:
+		sub.StringVar(&a.WebAddr, "addr", "", "listen address (default: "+webui.DefaultAddr+"; loopback only)")
+		sub.BoolVar(&a.WebOpen, "open", false, "print the URL and exit instead of serving (useful to check the bind)")
 	case CmdTools:
 		// no flags yet; reserved for future filters
 		// (e.g. --json, --package=git).
@@ -290,6 +301,7 @@ func findSubcommandIndex(argv []string) int {
 		CmdFix: true,
 		CmdRun: true, CmdResume: true, CmdCancel: true, CmdReport: true,
 		CmdAudit: true, CmdInit: true, CmdDaemon: true, CmdTools: true,
+		CmdWeb: true,
 	}
 	for i, a := range argv {
 		if strings.HasPrefix(a, "-") {
@@ -331,6 +343,7 @@ Subcommands:
   report <task>          Print a task report (json, markdown, html).
   audit [task]           Show the audit log; with --tail, follow.
   init                   Initialise the workspace (./var/).
+  web [--addr=host:port]  Serve the operator UI (embedded; loopback only).
   daemon start           Start the approval daemon (foreground by default).
   daemon stop            Stop the approval daemon.
 

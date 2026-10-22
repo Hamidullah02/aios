@@ -86,6 +86,8 @@ func RunCommand(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 		return runDaemon(ctx, args, deps, stderr)
 	case CmdTools:
 		return runTools(args, deps, stdout, stderr)
+	case CmdWeb:
+		return runWeb(args, deps, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "cli: unknown subcommand %q\n", args.Command)
 		return ExitUserError

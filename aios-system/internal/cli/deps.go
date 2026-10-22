@@ -25,6 +25,17 @@ import (
 var bootstrapSubcommands = map[string]bool{
 	CmdInit:   true,
 	CmdDaemon: true,
+	// `web` serves the operator UI. v0.41.0: it is in
+	// this set because the UI is useful before a policy
+	// exists -- an operator opens it to see that nothing
+	// has run yet -- and because requiring a policy to
+	// LOOK at state would make the first-run experience
+	// fail with a config error instead of an empty page.
+	//
+	// The UI is read-only over run state and can post
+	// messages; it can never start or stop a plan, so it
+	// grants no authority the policy would have denied.
+	CmdWeb: true,
 }
 
 // requiresPolicy reports whether the subcommand needs a

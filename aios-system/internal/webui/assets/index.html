@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aios</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#9679;</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <h1 class="brand">aios</h1>
+  <div class="status" id="conn" data-state="connecting">connecting</div>
+  <div class="spacer"></div>
+  <div class="controls">
+    <button id="theme-toggle" class="btn" title="Toggle theme">Theme</button>
+    <button id="layout-toggle" class="btn" title="Customise panels">Customise</button>
+    <button id="reset-layout" class="btn" title="Restore the default layout">Reset</button>
+  </div>
+</header>
+
+<!-- Layout editor. Hidden until the operator clicks
+     Customise; every control writes the whole layout back
+     through PUT /api/layout. -->
+<aside class="editor" id="editor" hidden>
+  <h2>Panels</h2>
+  <p class="hint">Drag to reorder. Uncheck to hide. Width is in grid columns.</p>
+  <ul id="panel-list" class="panel-list"></ul>
+  <div class="editor-row">
+    <label for="theme-select">Theme</label>
+    <select id="theme-select">
+      <option value="">Follow system</option>
+      <option value="dark">Dark</option>
+      <option value="light">Light</option>
+    </select>
+  </div>
+  <div class="editor-row">
+    <label for="compact-toggle">Compact grid</label>
+    <input type="checkbox" id="compact-toggle">
+  </div>
+  <p class="save-state" id="save-state"></p>
+</aside>
+
+<main class="grid" id="grid">
+  <!-- Panels are rendered here by app.js from the saved
+       layout. Each section carries data-panel so the
+       layout editor can find it. -->
+</main>
+
+<template id="panel-agents">
+  <section class="panel" data-panel="agents">
+    <header class="panel-head">
+      <h2>Agents</h2>
+      <span class="count" data-role="count"></span>
+    </header>
+    <div class="panel-body agent-grid" data-role="body">
+      <p class="empty">No agents yet.</p>
+    </div>
+  </section>
+</template>
+
+<template id="panel-comms">
+  <section class="panel" data-panel="comms">
+    <header class="panel-head">
+      <h2>Agent communication</h2>
+      <span class="count" data-role="count"></span>
+    </header>
+    <div class="panel-body comms" data-role="body">
+      <p class="empty">No messages yet.</p>
+    </div>
+    <form class="compose" data-role="compose">
+      <select data-role="from" title="From"></select>
+      <select data-role="to" title="To (blank broadcasts to all)">
+        <option value="">Everyone</option>
+      </select>
+      <input data-role="body" placeholder="Send a message to the agents" autocomplete="off">
+      <button class="btn primary" type="submit">Send</button>
+    </form>
+  </section>
+</template>
+
+<template id="panel-audit">
+  <section class="panel" data-panel="audit">
+    <header class="panel-head">
+      <h2>Activity</h2>
+    </header>
+    <div class="panel-body audit" data-role="body">
+      <p class="empty">No activity yet.</p>
+    </div>
+  </section>
+</template>
+
+<template id="agent-card">
+  <article class="agent" data-status="idle">
+    <header>
+      <span class="dot"></span>
+      <span class="agent-label"></span>
+    </header>
+    <div class="agent-tool"></div>
+    <p class="agent-detail"></p>
+  </article>
+</template>
+
+<script src="/app.js"></script>
+</body>
+</html>

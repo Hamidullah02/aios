@@ -30,6 +30,13 @@ type Orchestrator struct {
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
+
+	// observers receive task lifecycle events (v0.41.0).
+	// A separate lock from mu because mu guards cancellation
+	// and is held across the whole run, while the observer
+	// set is read once per task and written rarely.
+	obsMu     sync.RWMutex
+	observers []Observer
 }
 
 // Config wires the orchestrator. Worker, Verifier, Meter,
@@ -135,8 +142,21 @@ func (o *Orchestrator) Run(parentCtx context.Context, plan *schemas.TaskPlan, ch
 			_ = o.saveCheckpoint(plan, i, taskCtx)
 			_ = o.writeStateRow(plan.ID, "task_paused", i, taskCtx)
 			report.TaskStates[task.ID] = state.StatePaused
+			o.notify(Observer.TaskFailed, TaskEvent{
+				PlanID: plan.ID, TaskID: task.ID, Tool: task.Tool,
+				State: state.StatePaused, Detail: "budget_exhausted", Err: err,
+			})
 			return report, err
 		}
+
+		// v0.41.0: announce the task before the worker runs
+		// so a live view shows "running" rather than
+		// nothing until it finishes.
+		_ = o.writeTaskRow(task.ID, plan.ID, "task_started", task.Tool)
+		o.notify(Observer.TaskStarted, TaskEvent{
+			PlanID: plan.ID, TaskID: task.ID, Tool: task.Tool,
+			State: state.StateRunning,
+		})
 
 		// Run the worker. The worker may raise *WaitingForApproval,
 		// in which case we propagate the error and stop the plan
@@ -153,11 +173,21 @@ func (o *Orchestrator) Run(parentCtx context.Context, plan *schemas.TaskPlan, ch
 				// the approval and resume from the same step.
 				_ = o.saveCheckpoint(plan, i, taskCtx)
 				_ = o.writeStateRow(plan.ID, "task_awaiting_approval", i, taskCtx)
+				o.notify(Observer.TaskFailed, TaskEvent{
+					PlanID: plan.ID, TaskID: task.ID, Tool: task.Tool,
+					State:  state.StateAwaitingApproval,
+					Detail: "waiting_for_approval", Err: err,
+				})
 				return report, err
 			}
 			report.StoppedReason = "worker_error"
 			report.LastError = err
 			report.TaskStates[task.ID] = state.StateFailed
+			_ = o.writeTaskRow(task.ID, plan.ID, "task_failed", task.Tool)
+			o.notify(Observer.TaskFailed, TaskEvent{
+				PlanID: plan.ID, TaskID: task.ID, Tool: task.Tool,
+				State: state.StateFailed, Detail: "worker_error", Err: err,
+			})
 			return report, err
 		}
 
@@ -207,6 +237,14 @@ func (o *Orchestrator) Run(parentCtx context.Context, plan *schemas.TaskPlan, ch
 		taskCtx.recordTaskVars(task.ID, result.Data)
 		// Save a checkpoint after every successful task.
 		_ = o.saveCheckpoint(plan, i+1, taskCtx)
+		// v0.41.0: announce completion last, after the
+		// checkpoint is durable, so a live view never shows a
+		// task as done that a crash could roll back.
+		_ = o.writeTaskRow(task.ID, plan.ID, "task_passed", task.Tool)
+		o.notify(Observer.TaskFinished, TaskEvent{
+			PlanID: plan.ID, TaskID: task.ID, Tool: task.Tool,
+			State: state.StateCompleted,
+		})
 	}
 
 	report.StoppedReason = "completed"
@@ -273,6 +311,45 @@ func (o *Orchestrator) writeStateRow(planID, kind string, idx int, taskCtx *Task
 		Payload: map[string]any{
 			"task_index": idx,
 			"context":    taskCtx.Vars,
+		},
+	}
+	_, err := o.log.Write(row)
+	return err
+}
+
+// writeTaskRow writes a task-scoped lifecycle row.
+//
+// v0.41.0: this is separate from writeStateRow because the
+// two answer different questions and conflate them made the
+// history unusable.
+//
+// writeStateRow is keyed by PLAN id and answers "how far
+// did the plan get" -- that is what `aios resume` reads to
+// decide where to restart. Changing its TaskID to a task id
+// would break resume.
+//
+// This row is keyed by TASK id and answers "what happened
+// to this task" -- that is what an operator watching a
+// panel needs, and what the UI's audit-log backfill reads.
+//
+// Before this, the only per-task rows in the log came from
+// the bus (tool_call) and from the memory tools
+// (memory_write). A task that ran a tool but was still
+// running, or that finished with no tool call, left no
+// trace at all, so a freshly-started UI showed nothing for
+// it.
+func (o *Orchestrator) writeTaskRow(taskID, planID, kind, tool string) error {
+	if o.log == nil {
+		return nil
+	}
+	row := &audit.Row{
+		TaskID:   taskID,
+		Kind:     kind,
+		Actor:    "orchestrator",
+		RiskTier: 0,
+		Payload: map[string]any{
+			"plan_id": planID,
+			"tool":    tool,
 		},
 	}
 	_, err := o.log.Write(row)
