@@ -194,6 +194,17 @@ func (o *Orchestrator) Run(parentCtx context.Context, plan *schemas.TaskPlan, ch
 		})
 
 		report.TaskStates[task.ID] = state.StateCompleted
+		// v0.40.0: publish this task's structured output
+		// into the vars bag so a later task can reference
+		// it as `$vars.<taskID>.<key>` (or `$vars.last.<key>`
+		// for the immediately-previous task).
+		//
+		// This runs AFTER the verdict check, so a failed or
+		// paused task never contributes a value a later task
+		// could build on. The vars bag is already serialized
+		// into every checkpoint and state row below, so
+		// `aios resume` restores the references too.
+		taskCtx.recordTaskVars(task.ID, result.Data)
 		// Save a checkpoint after every successful task.
 		_ = o.saveCheckpoint(plan, i+1, taskCtx)
 	}

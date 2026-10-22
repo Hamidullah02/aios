@@ -41,7 +41,7 @@ func NewBusWorker(bus *tools.Bus, askTool *ask.AskUserTool, workspace string) *B
 
 // Run implements runtime.Worker. The task's `tool` field
 // is the bus dispatch name. The `inputs` are the args map.
-func (w *BusWorker) Run(input runtime.TaskInput, _ *runtime.TaskContext, _ *runtime.BudgetMeter) (runtime.WorkerResult, error) {
+func (w *BusWorker) Run(input runtime.TaskInput, taskCtx *runtime.TaskContext, _ *runtime.BudgetMeter) (runtime.WorkerResult, error) {
 	if w.bus == nil {
 		return runtime.WorkerResult{}, errors.New("cli: bus worker: bus is nil")
 	}
@@ -55,9 +55,23 @@ func (w *BusWorker) Run(input runtime.TaskInput, _ *runtime.TaskContext, _ *runt
 	// comma-separated list (e.g. "echo,hello") becomes a
 	// []string, which `run_shell` requires for its
 	// `command` argv argument.
+	//
+	// v0.40.0: each input is first run through
+	// interpolateVars, so a task can reference an earlier
+	// task's output ("hash=$vars.t1.hash"). Interpolation
+	// happens BEFORE the split so the resolved value is
+	// what lands in the args map; a reference that does not
+	// resolve is left verbatim so the tool sees the literal
+	// and reports the unknown argument, rather than the
+	// worker failing the whole task on a typo.
+	var vars map[string]any
+	if taskCtx != nil {
+		vars = taskCtx.Vars
+	}
 	args := make(map[string]any, len(input.Inputs)+1)
 	for _, in := range input.Inputs {
-		k, v, ok := splitKV(in)
+		resolved := interpolateVars(in, vars)
+		k, v, ok := splitKV(resolved)
 		if !ok {
 			args[in] = nil
 			continue
@@ -66,6 +80,10 @@ func (w *BusWorker) Run(input runtime.TaskInput, _ *runtime.TaskContext, _ *runt
 		// tools like `run_shell` that expect argv. JSON
 		// objects (which also contain commas) stay as
 		// strings so the receiver can json.Unmarshal.
+		//
+		// Interpolation runs first, so a resolved value
+		// that happens to contain a comma still splits
+		// correctly.
 		if hasComma(v) && !looksLikeJSON(v) {
 			args[k] = strings.Split(v, ",")
 		} else {
