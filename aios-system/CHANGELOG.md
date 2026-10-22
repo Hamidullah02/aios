@@ -1,4 +1,53 @@
 # Changelog
+v0.40.3 — a nil var leaf is unresolved, not an empty
+string
+
+`formatVarValue`'s doc comment stated that a nil leaf is
+NOT substituted, and gave the reason: writing `""` there
+"would look like a deliberate empty string rather than a
+missing value". The code did the opposite — `case nil:
+return ""`.
+
+So the shipped v0.40.0 contradicted its own documented
+contract in the one case where the difference matters most.
+`interpolateVars`' stated rule is that an unresolvable
+reference is left verbatim so the failure stays visible,
+and a nil leaf broke that rule: the tool silently received
+`""` and did whatever an empty argument means to it, with
+nothing in the output to say the reference had never
+resolved.
+
+A nil leaf is what a tool emits for a null field. It tells a
+later task nothing, so it is now treated as unresolved and
+left verbatim, exactly like a missing key.
+
+The nil case is filtered in `interpolateVars` rather than in
+`formatVarValue`, so the decision to substitute sits next to
+the lookup that produced the value. `formatVarValue` keeps a
+nil case only to keep the switch total for a future caller.
+
+The fix is deliberately narrow. A key present with an EMPTY
+STRING is a real value and still substitutes, so a tool can
+receive `""` on purpose; a nil sibling does not disable the
+rest of the task's map. Both boundaries are pinned by tests.
+
+Tests (3): a top-level nil leaf is left verbatim; an empty
+string leaf resolves to `""`; a nil leaf nested in a task's
+output map is left verbatim while its sibling key in the
+same map still resolves.
+
+Verified live. A three-task plan: t1 remembers a decision,
+t2 recalls it by `$vars.t1.hash` and succeeds, t3 references
+`$vars.t2.no_such_field`, which t2's output does not
+contain. The checkpoint confirms t2's vars map has keys
+content, hash, kind, scope, session_id, tags, task_id and
+timestamp — and no `no_such_field` — so the reference
+reached the tool as the literal string, memory reported
+"artifact not found", and the run exited 2. With the bug
+live, t3 would have recalled with an empty hash and the
+mistake would have been invisible.
+
+---
 v0.40.2 — one audit-log default instead of two
 
 The default audit-log path was written down twice and the

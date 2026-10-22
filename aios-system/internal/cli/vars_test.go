@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sadi/aios-system/internal/runtime"
@@ -133,17 +132,53 @@ func TestInterpolate_NilVars(t *testing.T) {
 	}
 }
 
-// TestInterpolate_NilLeafDoesNotCrash asserts a key that
-// exists with a nil value does not panic and does not
-// substitute a misleading empty string.
-func TestInterpolate_NilLeafDoesNotCrash(t *testing.T) {
+// TestInterpolate_NilLeafIsLeftVerbatim asserts a key that
+// exists with a nil value is treated as unresolved, not
+// substituted with "".
+//
+// v0.40.3: this returned "", which contradicted both this
+// test's own name and interpolateVars' documented contract
+// that an unresolvable reference is left verbatim. A nil
+// leaf is what a tool emits for a null field, and it tells
+// a later task nothing. Handing the tool "" instead would
+// look like a deliberate empty argument and silently do the
+// wrong thing, so it is left verbatim like any other
+// unresolved reference.
+func TestInterpolate_NilLeafIsLeftVerbatim(t *testing.T) {
 	vars := map[string]any{"nothing": nil}
-	got := interpolateVars("x=$vars.nothing", vars)
-	// A nil leaf formats as "", which is a legitimate
-	// "the key exists but holds nothing" answer. The
-	// important part is that it did not panic.
-	if !strings.HasPrefix(got, "x=") {
-		t.Errorf("got %q, want an x= prefix", got)
+	in := "x=$vars.nothing"
+	if got := interpolateVars(in, vars); got != in {
+		t.Errorf("got %q, want %q left verbatim", got, in)
+	}
+}
+
+// TestInterpolate_EmptyStringLeafDoesResolve is the paired
+// case that keeps the fix honest: a key present with an
+// EMPTY STRING is a real value and must substitute, or the
+// nil fix would be too broad and a tool could never receive
+// "" on purpose.
+func TestInterpolate_EmptyStringLeafDoesResolve(t *testing.T) {
+	vars := map[string]any{"empty": ""}
+	if got := interpolateVars("x=$vars.empty", vars); got != "x=" {
+		t.Errorf("got %q, want %q (an explicit empty string is a value)", got, "x=")
+	}
+}
+
+// TestInterpolate_NestedNilLeafIsLeftVerbatim covers the
+// same case one level down, where the nil is inside a task's
+// output map.
+func TestInterpolate_NestedNilLeafIsLeftVerbatim(t *testing.T) {
+	vars := map[string]any{
+		"t1": map[string]any{"hash": nil, "ok": "yes"},
+	}
+	in := "hash=$vars.t1.hash"
+	if got := interpolateVars(in, vars); got != in {
+		t.Errorf("got %q, want %q left verbatim", got, in)
+	}
+	// The sibling key must still resolve, so the fix does
+	// not disable the whole task's map.
+	if got := interpolateVars("ok=$vars.t1.ok", vars); got != "ok=yes" {
+		t.Errorf("got %q, want ok=yes", got)
 	}
 }
 

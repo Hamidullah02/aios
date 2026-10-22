@@ -53,7 +53,15 @@ func interpolateVars(s string, vars map[string]any) string {
 			return ref
 		}
 		v, ok := lookupVarPath(vars, strings.Split(m[1], "."))
-		if !ok {
+		// A nil leaf is treated as unresolved, not as an
+		// empty string. lookupVarPath reports (nil, true)
+		// when the key exists but holds nil, which is
+		// indistinguishable from "the tool wrote a null
+		// field" and tells a later task nothing. Substituting
+		// "" there would hand the tool a plausible-looking
+		// empty argument that silently does the wrong thing.
+		// Leaving it verbatim keeps the failure visible.
+		if !ok || v == nil {
 			return ref
 		}
 		return formatVarValue(v)
@@ -92,14 +100,12 @@ func lookupVarPath(vars map[string]any, path []string) (any, bool) {
 // else falls back to fmt.Sprint, which is what a
 // structured value (a slice, a nested map) degrades to.
 //
-// A nil leaf is NOT substituted: lookupVarPath can return
-// (nil, true) when a key exists with a nil value, and
-// writing "" there would look like a deliberate empty
-// string rather than a missing value.
+// A nil value is filtered out by the caller, so it never
+// reaches this function; the case is kept only so the
+// switch is total for a future caller that forgets the
+// check.
 func formatVarValue(v any) string {
 	switch t := v.(type) {
-	case nil:
-		return ""
 	case string:
 		return t
 	case bool:
