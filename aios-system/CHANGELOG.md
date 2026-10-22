@@ -1,4 +1,36 @@
 # Changelog
+v0.40.1 — `aios audit` explains an empty result
+
+`aios audit --task=no-such-task` printed nothing at all
+and exited 0. That is a correct exit code — an unknown
+task is a legitimate question with a legitimate empty
+answer — but a blank screen gives the operator no way to
+tell three very different situations apart:
+
+  - the task id is wrong,
+  - the audit log is empty,
+  - the command is pointed at the wrong database file.
+
+All three look identical from the terminal, and all three
+invite the same wrong conclusion ("audit is broken").
+
+`Audit` now says which query came back empty:
+`no rows for task <id>`, or `no rows in the audit log`
+for the no-task-id variant. Exit code is unchanged at 0.
+
+This closes the loop on v0.39.0, where `memory_write`
+rows were correctly persisted but invisible through
+`aios audit` — an operator debugging memory behaviour had
+no way to tell "the tool never wrote a row" from "audit
+is not showing me the row".
+
+Tests added (6): unknown task id explains itself, empty
+log explains itself, a known task id still lists its rows
+with no empty-result message, the no-task-id union still
+lists every kind including memory_write, and the parser
+accepts both the empty and positional forms.
+
+---
 v0.39.0 — expose the memory layer as tools
 (`memory`, `memory_write`)
 

@@ -175,10 +175,10 @@ func Audit(taskID string, deps AuditDeps) error {
 		}
 		rows = r
 	} else {
+		seen := make(map[int64]bool)
 		// Union across the well-known kinds. Each call
 		// to GetByKind returns up to 1000 rows; the union
 		// is sorted in SQL order.
-		seen := make(map[int64]bool)
 		kinds := []string{
 			"tool_call", "approval_requested", "approval_granted",
 			"approval_denied", "approval_expired", "task_started",
@@ -208,6 +208,21 @@ func Audit(taskID string, deps AuditDeps) error {
 	}
 	for _, r := range rows {
 		fmt.Fprintf(deps.Out, "%d\t%s\t%s\t%s\n", r.SequenceNumber, r.TaskID, r.Kind, r.ContentHash)
+	}
+	// v0.40.0: an empty result is a normal answer, not a
+	// failure, but printing nothing at all reads as a
+	// broken command. Say which query came back empty so
+	// the operator can tell "no such task" from "the log
+	// is empty" from "I am looking at the wrong file".
+	//
+	// Exit code stays 0: an unknown task is a legitimate
+	// question with a legitimate answer.
+	if len(rows) == 0 {
+		if taskID != "" {
+			fmt.Fprintf(deps.Out, "no rows for task %s\n", taskID)
+		} else {
+			fmt.Fprintln(deps.Out, "no rows in the audit log")
+		}
 	}
 	_ = deps.Tail // tail is a no-op today
 	return nil
