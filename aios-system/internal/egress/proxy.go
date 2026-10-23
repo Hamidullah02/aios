@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +53,109 @@ type Proxy struct {
 	// requestCounter is a monotonic counter used as a fallback
 	// request id when the client did not supply X-Aios-Request-Id.
 	requestCounter uint64
+}
+
+// serveConnect handles an HTTP CONNECT tunnel.
+//
+// The allow-list check happens on the CONNECT target, before a
+// single byte of the tunneled stream is forwarded. That is the
+// point of the method: once the tunnel is established the proxy
+// cannot see inside it, so the decision has to be made on the
+// authority the client asked for, and a client that asks for a
+// host outside the list never gets a socket.
+//
+// The tunneled bytes are not inspected. The proxy enforces WHICH
+// host the client may reach, not what the client says to it
+// once it gets there. A host in the allow-list is a host the
+// operator trusted; the traffic to it is the operator's problem
+// to scope, and TLS is what keeps the proxy from being in that
+// position at all.
+func (p *Proxy) serveConnect(w http.ResponseWriter, r *http.Request, requestID string, start time.Time) {
+	host := connectTarget(r)
+	if host == "" {
+		p.writeAuditRow(requestID, r.Method, "", http.StatusBadRequest, start, "bad_request", "malformed CONNECT target")
+		http.Error(w, "bad request: malformed CONNECT target", http.StatusBadRequest)
+		return
+	}
+
+	if !p.allow.Allows(host) {
+		p.writeAuditRow(requestID, r.Method, host, http.StatusForbidden, start, "host_not_allowed", "")
+		http.Error(w, "host not in allow list: "+host, http.StatusForbidden)
+		return
+	}
+
+	// The client asked for a specific port. An authority of
+	// "example.com" with no port means 443 for CONNECT, which
+	// is the only scheme that uses this method.
+	upstreamHost, port, err := net.SplitHostPort(host)
+	if err != nil {
+		upstreamHost = host
+		port = "443"
+	}
+
+	// Dial the upstream directly. The transport's proxy setting
+	// is deliberately nil so this cannot loop back into the
+	// proxy.
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	upstream, err := dialer.DialContext(r.Context(), "tcp", net.JoinHostPort(upstreamHost, port))
+	if err != nil {
+		p.writeAuditRow(requestID, r.Method, host, http.StatusBadGateway, start, "upstream_error", err.Error())
+		http.Error(w, "upstream error: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer upstream.Close()
+
+	// A CONNECT needs a hijacked connection: the proxy stops
+	// being an HTTP server for this socket and becomes a pipe.
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		p.writeAuditRow(requestID, r.Method, host, http.StatusInternalServerError, start, "hijack_unsupported", "")
+		http.Error(w, "proxy: connection hijacking unsupported", http.StatusInternalServerError)
+		return
+	}
+	client, _, err := hj.Hijack()
+	if err != nil {
+		p.writeAuditRow(requestID, r.Method, host, http.StatusInternalServerError, start, "hijack_failed", err.Error())
+		return
+	}
+	defer client.Close()
+
+	// Answer 200 before the first byte of the tunnel is copied.
+	// A client that receives anything else treats the tunnel as
+	// failed and does not send the TLS handshake.
+	if _, err := client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+		p.writeAuditRow(requestID, r.Method, host, http.StatusBadGateway, start, "hijack_write_failed", err.Error())
+		return
+	}
+
+	p.writeAuditRow(requestID, r.Method, host, http.StatusOK, start, "tunnel_established", "")
+
+	// Copy in both directions. The first error to end either
+	// direction tears the tunnel down, which is what a client
+	// closing the connection looks like.
+	errc := make(chan error, 2)
+	go func() {
+		_, err := io.Copy(upstream, client)
+		errc <- err
+	}()
+	go func() {
+		_, err := io.Copy(client, upstream)
+		errc <- err
+	}()
+	<-errc
+}
+
+// connectTarget returns the host a CONNECT request asked for.
+//
+// RFC 7231 §4.3.6 defines the request target of a CONNECT as
+// the authority form ("host:port"). Go's server puts that in
+// r.Host, not r.RequestURI, so both are consulted: a hand-rolled
+// client may send the authority on the request line.
+func connectTarget(r *http.Request) string {
+	if r.Host != "" {
+		return strings.TrimSpace(r.Host)
+	}
+	return strings.TrimSpace(r.RequestURI)
 }
 
 // Config controls Proxy construction.
@@ -123,6 +227,21 @@ func (p *Proxy) Handler() http.Handler {
 func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	start := p.clock.Now()
 	requestID := p.requestID(r)
+
+	// CONNECT is the tunnel method. It is handled separately
+	// because its request target is an authority ("host:port"),
+	// not an absolute URL, and because the body of the
+	// conversation after the handshake is opaque TLS.
+	//
+	// Without this, the proxy could only police plain HTTP:
+	// every HTTPS client would send CONNECT, the proxy would
+	// refuse it as a malformed URL, and the allow-list would
+	// have no effect on TLS traffic at all.
+	if r.Method == http.MethodConnect {
+		p.serveConnect(w, r, requestID, start)
+		return
+	}
+
 	targetURL, terr := extractTargetURL(r)
 	if terr != nil {
 		p.writeAuditRow(requestID, r.Method, r.RequestURI, http.StatusBadRequest, start, "bad_request", terr.Error())
@@ -195,17 +314,43 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 // blocks until the server exits. Use Shutdown to stop it from
 // another goroutine.
 func (p *Proxy) Serve() error {
+	ln, err := p.Listen()
+	if err != nil {
+		return err
+	}
+	return p.server.Serve(ln)
+}
+
+// ServeListener serves on an already-bound listener.
+//
+// It is the counterpart to Listen: the caller binds first, so it
+// knows the address before the proxy starts accepting, and then
+// serves on that same listener.
+func (p *Proxy) ServeListener(ln net.Listener) error {
+	if p.server == nil {
+		return fmt.Errorf("egress: serve: listener not bound")
+	}
+	return p.server.Serve(ln)
+}
+
+// Listen binds the proxy's socket without serving on it.
+//
+// The split exists because the caller needs the bound address
+// BEFORE the child can be pointed at it. The child is configured
+// with the proxy URL in its environment, and that URL has to name
+// the port the proxy actually bound to -- with a port of 0, the
+// configured address is not the address the child can reach.
+func (p *Proxy) Listen() (net.Listener, error) {
+	ln, err := net.Listen("tcp", p.listen)
+	if err != nil {
+		return nil, fmt.Errorf("egress: listen %s: %w", p.listen, err)
+	}
 	p.server = &http.Server{
-		Addr:              p.listen,
+		Addr:              ln.Addr().String(),
 		Handler:           p.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	ln, err := net.Listen("tcp", p.listen)
-	if err != nil {
-		return fmt.Errorf("egress: listen %s: %w", p.listen, err)
-	}
-	p.server.Addr = ln.Addr().String()
-	return p.server.Serve(ln)
+	return ln, nil
 }
 
 // Shutdown gracefully stops the server. Safe to call from another
@@ -224,6 +369,16 @@ func (p *Proxy) Addr() string {
 		return p.listen
 	}
 	return p.server.Addr
+}
+
+// URL returns the proxy URL a child should be pointed at.
+//
+// It is the address the proxy bound to, with the http scheme.
+// A caller configures the child's environment with this, so the
+// child and the proxy agree on the port even when the configured
+// port was 0.
+func (p *Proxy) URL() string {
+	return "http://" + p.Addr()
 }
 
 func (p *Proxy) requestID(r *http.Request) string {

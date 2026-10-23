@@ -13,7 +13,12 @@ import (
 type runner = sandbox.Runner
 
 // newRunner returns the default subprocess runner.
-func newRunner() runner { return sandbox.NewSubprocessRunner() }
+//
+// It is the process-wide default rather than a fresh runner so a
+// policy installed at startup (the network policy, for one)
+// applies to git as well. A git command that fetches from a
+// remote is a network operation like any other.
+func newRunner() runner { return sandbox.DefaultRunner() }
 
 // lookPath is the binary lookup. The default is exec.LookPath;
 // tests can override it on the tool struct.

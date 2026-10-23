@@ -45,25 +45,60 @@ func runWeb(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// If an approval daemon is running, this UI can show the
+	// pending queue and apply decisions to it.
+	//
+	// `aios web` is a separate process from the run, so it
+	// holds no approvals of its own. Without the daemon it can
+	// still show agent history, but the approval panel would be
+	// permanently empty -- and an operator looking at a run
+	// that is blocked would find a panel that says nothing,
+	// which is worse than one that explains it cannot act.
+	var stopPoll chan struct{}
+	if args.SocketPath != "" {
+		res := NewDaemonApprovalResolver(args.SocketPath, stderr)
+		hub.SetApprovalResolver(res)
+		stopPoll = make(chan struct{})
+		go pollDaemonApprovals(res, hub, stopPoll, stderr)
+	}
+
 	srv, err := webui.New(webui.Config{Hub: hub, Addr: args.WebAddr})
 	if err != nil {
+		if stopPoll != nil {
+			close(stopPoll)
+		}
 		fmt.Fprintf(stderr, "error: system: %v\n", err)
 		return ExitSystemError
 	}
 
-	url := "http://" + srv.Addr() + "/"
+	// Bind before printing the URL. With a port of 0 the
+	// configured address is not the address the browser can
+	// reach, and a printed URL that does not open is worse than
+	// no URL at all.
+	ln, err := srv.Listen()
+	if err != nil {
+		if stopPoll != nil {
+			close(stopPoll)
+		}
+		fmt.Fprintf(stderr, "error: system: %v\n", err)
+		return ExitSystemError
+	}
+
+	url := srv.SessionURL()
 	if args.WebOpen {
-		// --open reports the URL without binding. It exists
+		// --open reports the URL without serving. It exists
 		// so an operator can check what the command would do
 		// without holding a port, which matters in CI and in
 		// a scripted smoke test.
 		fmt.Fprintln(stdout, url)
+		_ = ln.Close()
 		return ExitOK
 	}
 
 	fmt.Fprintf(stdout, "aios web: serving %s\n", url)
+	fmt.Fprintf(stdout, "the link above carries this session's token; treat it as a credential.\n")
 	fmt.Fprintf(stdout, "press Ctrl-C to stop\n")
-	if err := srv.ListenAndServe(); err != nil {
+	if err := srv.Serve(ln); err != nil {
 		fmt.Fprintf(stderr, "error: system: %v\n", err)
 		return ExitSystemError
 	}

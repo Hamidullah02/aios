@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -187,6 +188,34 @@ func (s *Service) Get(approvalID string) (Approval, error) {
 		return Approval{}, err
 	}
 	return e.a, nil
+}
+
+// Pending returns every approval still waiting on a decision.
+//
+// The service could always answer "what is this one
+// approval", but not "what is everything outstanding", and
+// that second question is what an operator dashboard asks.
+// Without it a UI has no way to show a queue; it would have to
+// be handed ids by the process that created them, which is
+// exactly the coupling that breaks when the UI runs in a
+// different process from the run.
+//
+// Sorted oldest first so the request that has been waiting
+// longest is the one an operator sees at the top.
+func (s *Service) Pending() []Approval {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	out := make([]Approval, 0, len(s.approvals))
+	for _, e := range s.approvals {
+		if e.a.State == StatePending {
+			out = append(out, e.a)
+		}
+	}
+	s.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
+	return out
 }
 
 func (s *Service) transition(approvalID, actor string, target State, ctx Context) error {

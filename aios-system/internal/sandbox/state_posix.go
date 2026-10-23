@@ -1,4 +1,4 @@
-//go:build unix || darwin || linux
+//go:build linux || darwin
 
 package sandbox
 

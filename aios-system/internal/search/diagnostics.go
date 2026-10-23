@@ -79,7 +79,7 @@ func (d DiagnosticsTool) Run(args map[string]any, ctx tools.Context) (tools.Resu
 		// Default to the real subprocess runner. Tests always
 		// pass a fake runner, so this branch is exercised by
 		// integration callers.
-		runner = sandbox.NewSubprocessRunner()
+		runner = sandbox.DefaultRunner()
 	}
 	res, err := runner.Run(sandbox.RunOptions{Command: cmd, Cwd: ws, Timeout: 120})
 	diags := parseDiagnostics(checker, res.Stdout, res.Stderr, path)

@@ -3,8 +3,11 @@ package webui
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -39,6 +42,16 @@ type Server struct {
 	hub  *Hub
 	mux  *http.ServeMux
 	addr string
+	// auth is the session boundary: one token for the process,
+	// plus the host and origin checks that keep a browser on
+	// another site from driving the UI.
+	auth *auth
+	// handler is the mux with the auth middleware in front of
+	// it, so every request goes through the same chain.
+	handler http.Handler
+	// boundAddr is the address the listener actually bound to.
+	// It differs from addr when the port was 0.
+	boundAddr string
 }
 
 // Config configures a Server.
@@ -48,6 +61,22 @@ type Config struct {
 	// Addr is the listen address. An empty Addr uses
 	// DefaultAddr.
 	Addr string
+	// Token pins the session token. An empty Token uses
+	// EnvToken from the environment, and if that is unset a
+	// fresh token is generated for this process.
+	//
+	// Pinning it is what lets an operator (or a test)
+	// authenticate without reading the URL the server prints.
+	Token string
+	// AllowedHosts names extra host names the server answers
+	// to, on top of the loopback names and the bind host.
+	//
+	// It exists for the case where the operator reaches the
+	// UI through a name that resolves to the machine: the host
+	// check rejects a request whose Host header is not one of
+	// ours, and an operator with their own hostname would
+	// otherwise be locked out.
+	AllowedHosts []string
 }
 
 // DefaultAddr binds loopback only.
@@ -68,7 +97,11 @@ func New(cfg Config) (*Server, error) {
 	if addr == "" {
 		addr = DefaultAddr
 	}
-	s := &Server{hub: cfg.Hub, mux: http.NewServeMux(), addr: addr}
+	a, err := newAuth(cfg.Token, addr, cfg.AllowedHosts)
+	if err != nil {
+		return nil, fmt.Errorf("webui: session token: %w", err)
+	}
+	s := &Server{hub: cfg.Hub, mux: http.NewServeMux(), addr: addr, auth: a}
 
 	sub, err := Assets()
 	if err != nil {
@@ -86,15 +119,59 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/layout", s.handleGetLayout)
 	s.mux.HandleFunc("PUT /api/layout", s.handlePutLayout)
 	s.mux.HandleFunc("POST /api/agents/{id}/status", s.handleAgentStatus)
+	s.mux.HandleFunc("GET /api/approvals", s.handleApprovals)
+	s.mux.HandleFunc("POST /api/approvals/{id}", s.handleApprovalDecision)
+	s.handler = s.withAuth(s.mux)
 	return s, nil
 }
 
-// Addr returns the configured listen address.
-func (s *Server) Addr() string { return s.addr }
+// Addr returns the address the server is reachable on.
+//
+// Before the listener is bound this is the configured address;
+// afterwards it is the address the listener actually bound to,
+// which matters when the configured port was 0.
+func (s *Server) Addr() string {
+	if s.boundAddr != "" {
+		return s.boundAddr
+	}
+	return s.addr
+}
+
+// Token returns the session token for this server.
+//
+// It is a capability: it grants full control of the UI, including
+// approving tool calls, so it is printed only in the URL the
+// operator opens and never written to the audit log.
+func (s *Server) Token() string {
+	if s == nil || s.auth == nil {
+		return ""
+	}
+	return s.auth.token
+}
+
+// SessionURL returns the URL the operator opens to start a
+// session.
+//
+// The token rides in the query string exactly once. The first
+// request trades it for a cookie and redirects to the clean URL, so
+// the token does not linger in the address bar or in a copied link.
+func (s *Server) SessionURL() string {
+	return s.BaseURL() + "?" + tokenParam + "=" + s.Token()
+}
+
+// BaseURL returns the UI's address with no token.
+//
+// It is for reporting the bind address without handing out a
+// credential: the session token is minted per process, so a token
+// printed by a command that is about to exit would not work for the
+// server that comes after it.
+func (s *Server) BaseURL() string {
+	return "http://" + s.Addr() + "/"
+}
 
 // Handler returns the routed handler. Tests use it with
 // httptest instead of binding a port.
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler { return s.handler }
 
 // ListenAndServe starts the server and blocks.
 //
@@ -105,17 +182,44 @@ func (s *Server) Handler() http.Handler { return s.mux }
 // process that is about to be killed anyway would be
 // code with no caller.
 func (s *Server) ListenAndServe() error {
+	ln, err := s.Listen()
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
+}
+
+// Listen binds the server's socket without serving on it.
+//
+// The bound address is what the operator has to open, and a port of
+// 0 means the real port is only known after the bind. Splitting
+// the bind from the serve lets the caller print a URL that
+// actually works: with a port of 0, the address from the config is
+// not the address the browser can reach.
+func (s *Server) Listen() (net.Listener, error) {
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return nil, fmt.Errorf("webui: listen %s: %w", s.addr, err)
+	}
+	s.boundAddr = ln.Addr().String()
+	return ln, nil
+}
+
+// Serve serves on an already-bound listener.
+//
+// It blocks until the server stops.
+func (s *Server) Serve(ln net.Listener) error {
 	srv := &http.Server{
-		Addr:              s.addr,
-		Handler:           s.mux,
+		Addr:              s.boundAddr,
+		Handler:           s.handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		// No WriteTimeout: it would cut off an SSE stream
 		// that is meant to stay open. The read side is
 		// bounded above, and a UI with no input is not a
 		// resource risk.
 	}
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("webui: serve %s: %w", s.addr, err)
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("webui: serve %s: %w", s.boundAddr, err)
 	}
 	return nil
 }
@@ -188,6 +292,8 @@ var knownAPI = apiRoutes{
 	"/api/messages":           {"POST"},
 	"/api/layout":             {"GET", "PUT"},
 	"/api/agents/{id}/status": {"POST"},
+	"/api/approvals":          {"GET"},
+	"/api/approvals/{id}":     {"POST"},
 }
 
 type apiRoutes map[string][]string
@@ -207,13 +313,27 @@ func (a apiRoutes) Has(p string) bool {
 	}
 	const prefix = "/api/agents/"
 	const suffix = "/status"
-	return strings.HasPrefix(p, prefix) && strings.HasSuffix(p, suffix)
+	if strings.HasPrefix(p, prefix) && strings.HasSuffix(p, suffix) {
+		return true
+	}
+	// Approval decisions are per-id, same shape as the agent
+	// status route. Without this a POST with a bad method on a
+	// real approval id would fall through to the SPA handler
+	// and answer 200 with HTML.
+	const approvalPrefix = "/api/approvals/"
+	if strings.HasPrefix(p, approvalPrefix) && p != "/api/approvals/" {
+		return true
+	}
+	return false
 }
 
 // methodsFor returns the Allow header value for a path.
 func (a apiRoutes) methodsFor(p string) string {
 	if m, ok := a[p]; ok {
 		return strings.Join(m, ", ")
+	}
+	if strings.HasPrefix(p, "/api/approvals/") {
+		return "POST"
 	}
 	return "POST"
 }
@@ -313,6 +433,100 @@ type postMessageReq struct {
 	To   string `json:"to"`
 	Kind string `json:"kind"`
 	Body string `json:"body"`
+}
+
+// handleApprovals lists the approval requests waiting on an
+// operator decision.
+func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"approvals":   s.hub.PendingApprovals(),
+		"can_resolve": s.hub.CanResolveApprovals(),
+	})
+}
+
+// handleApprovalDecision applies a grant or deny from the
+// browser.
+//
+// The decision is in the body, not the path: the path carries
+// the approval id (so it is visible in a server log) and the
+// body carries what the operator chose. Keeping the verb in
+// the body means one route instead of two, and the id is
+// still the thing that scopes the action.
+func (s *Server) handleApprovalDecision(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "approval id is required",
+		})
+		return
+	}
+
+	var body struct {
+		Approve *bool `json:"approve"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "body must be {\"approve\": true|false}",
+		})
+		return
+	}
+	// A missing "approve" is ambiguous: it could mean false, or
+	// it could mean the client sent the wrong shape. Treating
+	// it as false would silently DENY on a malformed request,
+	// which stops a run that nobody asked to stop. Requiring
+	// the field makes a client bug visible.
+	if body.Approve == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "body must include \"approve\": true or false",
+		})
+		return
+	}
+
+	state, err := s.hub.DecideApproval(id, *body.Approve)
+	if err != nil {
+		writeJSON(w, approvalErrorStatus(err), map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"approval": id,
+		"state":    state,
+	})
+}
+
+// approvalErrorStatus maps a decision failure to a status the
+// browser can act on.
+//
+// The distinction that matters is 404 vs 409: "I do not have
+// this approval" is a stale tab, while "I have it but cannot
+// grant it here" is a configuration the operator has to
+// change. Both are 4xx, so the UI shows the message either
+// way, but they are not the same failure.
+func approvalErrorStatus(err error) int {
+	switch {
+	case err == nil:
+		return http.StatusOK
+	case errors.Is(err, ErrNoResolver):
+		// The server is in the wrong mode: it is `aios web`
+		// with no approvals service. Nothing about the
+		// request was wrong, so this is not a client error.
+		return http.StatusServiceUnavailable
+	case errors.Is(err, ErrApprovalNotFound):
+		return http.StatusNotFound
+	default:
+		return http.StatusConflict
+	}
+}
+
+// decodeJSON reads a bounded JSON body.
+//
+// The limit matters because this handler is reachable from a
+// browser on loopback: an unbounded read is a way to pin a
+// server goroutine on a request that never ends.
+func decodeJSON(r *http.Request, v any) error {
+	defer func() { _ = r.Body.Close() }()
+	return json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(v)
 }
 
 func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {

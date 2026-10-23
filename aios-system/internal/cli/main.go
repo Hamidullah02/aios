@@ -69,6 +69,22 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	deps.Stderr = stderr
 	if args.Command == CmdRun || args.Command == CmdFix || args.Command == CmdResume {
 		deps.Approval = newApprovalHandler(args, deps)
+		// The egress guard installs the network policy on the
+		// process-wide default runner. It has to be started
+		// before any tool can run a subprocess, which is why
+		// it is here rather than inside the subcommand
+		// handlers.
+		guard, err := StartEgressGuard(workspaceForArgs(args), deps.Audit, args.EgressMode)
+		if err != nil {
+			fmt.Fprint(stderr, DisplayError(err, args.Debug))
+			return ExitCodeFor(err)
+		}
+		defer func() {
+			if err := guard.Close(); err != nil {
+				fmt.Fprintf(stderr, "cli: close egress guard: %v\n", err)
+			}
+		}()
+		fmt.Fprintln(stderr, guard.Describe())
 	}
 	defer func() {
 		if err := deps.Close(); err != nil {
@@ -76,6 +92,25 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		}
 	}()
 	return RunCommand(args, deps, stdout, stderr)
+}
+
+// workspaceForArgs returns the workspace directory for a run.
+//
+// The workspace is where var/egress.yaml lives, so the egress
+// guard needs the same directory the planner and the router
+// read. An explicit --workspace wins; otherwise the config
+// file's directory is the workspace.
+func workspaceForArgs(args *Args) string {
+	if args == nil {
+		return "./var"
+	}
+	if args.Workspace != "" {
+		return ensureWorkspace(args.Workspace)
+	}
+	if args.ConfigPath != "" {
+		return ensureWorkspace(filepath.Dir(args.ConfigPath))
+	}
+	return ensureWorkspace("./var")
 }
 
 // RunCommand dispatches on args.Command. The function is
@@ -220,6 +255,11 @@ func runRun(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Write
 	// commands are separate processes and only this one holds
 	// the orchestrator.
 	var live *webui.Hub
+	// approval is the handler the run uses. With --web it is
+	// the UI handler, so a gated call is decided in the
+	// browser; without it, it stays whatever Main wired (the
+	// terminal prompt or the daemon).
+	approval := deps.Approval
 	if args.WebLive {
 		live = webui.NewHub()
 		// Load the operator's saved panel arrangement so
@@ -232,20 +272,54 @@ func runRun(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Write
 			fmt.Fprint(stderr, DisplayError(&CliError{Kind: "config", What: "run --web: " + err.Error()}, args.Debug))
 			return ExitSystemError
 		}
-		url := "http://" + srv.Addr() + "/"
-		fmt.Fprintf(stdout, "aios: serving the operator UI at %s\n", url)
+		// Bind before printing the URL: with a port of 0 the
+		// configured address is not the address the browser can
+		// reach.
+		//
+		// A bind failure must not fail the plan. The plan is the
+		// point; the UI is a convenience. The run continues
+		// without the UI and says why.
+		ln, err := srv.Listen()
+		if err != nil {
+			fmt.Fprintf(stderr, "note: the operator UI could not start (%v); the run continues without it.\n", err)
+			ln = nil
+		}
+		// The handler is built AFTER the server so it can carry
+		// the address the listener actually bound to. Building
+		// it first meant the approval prompt printed the default
+		// port to an operator whose run was listening elsewhere.
+		//
+		// Registering the resolver is a field write on the hub,
+		// and the server has not started serving yet, so no
+		// request can arrive for a run that has nobody waiting
+		// on it.
+		//
+		// The URL is the session URL when the listener bound: it
+		// carries the token the browser needs. When the bind
+		// failed there is no UI to open, so the address is
+		// printed on its own and the prompt says where to go
+		// instead.
+		url := srv.BaseURL()
+		if ln != nil {
+			url = srv.SessionURL()
+			fmt.Fprintf(stdout, "aios: serving the operator UI at %s\n", url)
+			fmt.Fprintf(stdout, "the link above carries this session's token; treat it as a credential.\n")
+		}
+		approval = NewUIApprovalHandler(live, stderr, url)
 		// The server runs on its own goroutine and is never
 		// shut down: the process exits when the plan finishes,
 		// and a graceful-shutdown handshake for a process that
 		// is about to exit would be code with no caller.
-		go func() {
-			if sErr := srv.ListenAndServe(); sErr != nil {
-				// Not fatal: the plan is still running and the
-				// operator has the terminal report. Surface it
-				// and carry on.
-				fmt.Fprintf(stderr, "aios: web server stopped: %v\n", sErr)
-			}
-		}()
+		if ln != nil {
+			go func() {
+				if sErr := srv.Serve(ln); sErr != nil {
+					// Not fatal: the plan is still running and the
+					// operator has the terminal report. Surface it
+					// and carry on.
+					fmt.Fprintf(stderr, "aios: web server stopped: %v\n", sErr)
+				}
+			}()
+		}
 		// Give the listener a moment so the URL printed above
 		// is reachable by the time an operator clicks it. This
 		// is a courtesy delay, not a correctness barrier: the
@@ -260,7 +334,7 @@ func runRun(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Write
 		Worker:       deps.Worker,
 		Verifier:     deps.Verifier,
 		Budget:       deps.Budget,
-		Approval:     deps.Approval,
+		Approval:     approval,
 		Grants:       deps.Grants,
 		ReportWriter: nil,
 		Observer:     webui.NewBridge(live),

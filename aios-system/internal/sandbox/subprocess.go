@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,20 @@ type SubprocessRunner struct {
 	// Tests can inject a fake clock; production code can
 	// leave it nil and the runner uses time.Now.
 	now func() time.Time
+	// Network is the network policy this runner applies to
+	// every child it starts.
+	//
+	// The policy lives on the runner rather than on each
+	// RunOptions because the runner is the sandbox. A policy
+	// that had to be passed at every call site could be
+	// forgotten at exactly one call site -- the one that runs
+	// the interesting command -- and the failure would be
+	// silent. Here, a runner with a policy cannot start a
+	// child without it.
+	//
+	// A nil policy means no network policy, which is the
+	// historical behaviour.
+	Network *NetworkPolicy
 }
 
 // NewSubprocessRunner constructs a SubprocessRunner that
@@ -43,6 +58,15 @@ type SubprocessRunner struct {
 // use NewSubprocessRunnerWithClock instead.
 func NewSubprocessRunner() *SubprocessRunner {
 	return &SubprocessRunner{now: time.Now}
+}
+
+// NewSubprocessRunnerWithNetwork constructs a runner that applies
+// a network policy to every child.
+//
+// It is the constructor a production wiring uses: the proxy is
+// already running, and the runner is told to point children at it.
+func NewSubprocessRunnerWithNetwork(policy *NetworkPolicy) *SubprocessRunner {
+	return &SubprocessRunner{now: time.Now, Network: policy}
 }
 
 // NewSubprocessRunnerWithClock constructs a SubprocessRunner
@@ -55,6 +79,7 @@ func NewSubprocessRunnerWithClock(now func() time.Time) *SubprocessRunner {
 	}
 	return &SubprocessRunner{now: now}
 }
+
 // formatEnv converts an Env map into the []string form
 // os/exec.Cmd.Env expects. The order is non-deterministic
 // (Go map iteration); InheritEnv callers should not rely on
@@ -70,6 +95,28 @@ func formatEnv(m map[string]string) []string {
 	return out
 }
 
+// mergeEnv merges the caller's environment map over a list of
+// "KEY=VALUE" strings.
+//
+// The map wins: an explicit opts.Env entry is a deliberate
+// choice by the caller and overrides the inherited value. The
+// result is a map because the network policy has to rewrite
+// individual keys, and doing that on a slice would mean parsing
+// and re-serialising every entry.
+func mergeEnv(overrides map[string]string, base []string) map[string]string {
+	out := make(map[string]string, len(base)+len(overrides))
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		out[key] = value
+	}
+	for k, v := range overrides {
+		out[k] = v
+	}
+	return out
+}
 
 // RunOptions is the input to SubprocessRunner.Run.
 //
@@ -104,6 +151,18 @@ type RunOptions struct {
 	Cwd        string
 	Timeout    int
 	Limits     *ResourceLimits
+	// Network is the child's network policy.
+	//
+	// A nil Network means no policy: the child gets the
+	// environment the caller asked for, unchanged. That is the
+	// historical behaviour, and a caller that has not opted in
+	// is not silently changed.
+	//
+	// When set, the policy REWRITES the child's environment:
+	// the proxy variables are replaced with the policy's, and
+	// any proxy variable the caller had is removed. See
+	// NetworkPolicy.Apply for why removal matters.
+	Network *NetworkPolicy
 }
 
 // DefaultTimeout is the default wall-clock timeout when
@@ -234,6 +293,34 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 		env = os.Environ()
 	}
 	env = append(env, formatEnv(opts.Env)...)
+	// The network policy is applied LAST, so its proxy
+	// variables win over anything the caller or the parent
+	// environment supplied. A child that could read a
+	// different proxy out of its environment could route
+	// around the one the policy chose.
+	//
+	// The runner's own policy applies when the call site did
+	// not set one. The runner is the sandbox: a child started
+	// through it inherits the runner's policy unless the caller
+	// explicitly overrides it.
+	policy := opts.Network
+	if policy == nil {
+		policy = r.Network
+	}
+	if policy != nil {
+		if err := policy.Validate(); err != nil {
+			return SandboxResult{}, &SandboxError{Op: "network policy", Err: err}
+		}
+		// The policy is applied to the FULL environment the
+		// child would have had, not just to opts.Env. The
+		// inherited variables are part of what the child
+		// sees, and a proxy variable hiding in there is
+		// exactly the escape hatch the policy exists to
+		// close. Applying the policy to opts.Env alone
+		// would leave the inherited HTTP_PROXY in place for
+		// an InheritEnv caller, which is the run_tests tool.
+		env = formatEnv(policy.Apply(mergeEnv(opts.Env, env)))
+	}
 	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
@@ -254,10 +341,60 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 	}
 
 	start := r.now()
+	// Process-tree containment. On POSIX the child is put in
+	// its own process group; on Windows the child is put in a
+	// Job Object. Both give the runner one handle on the whole
+	// tree, so a command that backgrounds work does not leave
+	// grandchildren running past the timeout.
+	configureProcessGroup(cmd)
+	job, jobErr := startJobObject(&limits)
+	if jobErr != nil {
+		restoreParentLimits()
+		return SandboxResult{}, &SandboxError{Op: "start job object", Err: jobErr}
+	}
+	if job != nil {
+		defer job.close()
+	}
+	// The Cancel hook fires when the context is done, which is
+	// the timeout path. It kills the tree rather than just the
+	// direct child, so a `sh -c "sleep 999 &"` does not leave
+	// the sleep behind.
+	//
+	// The default Cancel is replaced because the default only
+	// kills the direct child.
+	cmd.Cancel = func() error {
+		killProcessTree(cmd, job)
+		return nil
+	}
+	// The Job Object assignment has to happen before the child
+	// can spawn anything, or a fast child could escape the job
+	// before the assignment lands. The child is created
+	// suspended and resumed after the assignment.
+	if job != nil {
+		prepareJobAssignment(cmd)
+	}
 	runErr := cmd.Start()
 	if runErr != nil {
 		restoreParentLimits()
+		if job != nil {
+			job.close()
+		}
 		return SandboxResult{}, &SandboxError{Op: "start", Err: runErr}
+	}
+	// The Job Object assignment has to happen before the child
+	// can spawn anything, or a fast child could escape the job
+	// before the assignment lands.
+	if job != nil {
+		if err := job.assignProcess(cmd); err != nil {
+			killProcessTree(cmd, job)
+			restoreParentLimits()
+			return SandboxResult{}, &SandboxError{Op: "assign job object", Err: err}
+		}
+		if err := resumeAfterAssignment(cmd); err != nil {
+			killProcessTree(cmd, job)
+			restoreParentLimits()
+			return SandboxResult{}, &SandboxError{Op: "resume child", Err: err}
+		}
 	}
 
 	waitErr := cmd.Wait()

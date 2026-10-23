@@ -30,6 +30,17 @@ type AllowList struct {
 	deny  []hostRule
 }
 
+// AllowCount returns the number of allow patterns in the list.
+//
+// It exists so an operator-facing summary can say how many hosts
+// are reachable without exposing the patterns themselves.
+func (a *AllowList) AllowCount() int {
+	if a == nil {
+		return 0
+	}
+	return len(a.allow)
+}
+
 // hostRule is a single pattern. The original string is kept for the
 // hash and the error path; `lower` is the normalised comparison key.
 type hostRule struct {

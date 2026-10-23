@@ -19,15 +19,67 @@ const state = {
   agents: [],
   messages: [],
   layout: null,
+  // approvals are the requests waiting on a human decision.
+  // canResolve says whether THIS server can apply one; when it
+  // is false (`aios web` as a separate process) the buttons are
+  // hidden and the panel points at the terminal or the daemon,
+  // because an approve button that cannot work is worse than
+  // no button at all.
+  approvals: [],
+  canResolveApprovals: false,
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+/* ---------- session ---------- */
+
+/* The UI is behind a session token. The browser holds it in an
+ * HttpOnly cookie, so the page script cannot read it -- which is
+ * the point: a cross-site script must not be able to lift the
+ * session out of the cookie jar.
+ *
+ * That leaves one gap: the EventSource that carries the live feed
+ * cannot set a header, and it relies on the cookie. The cookie is
+ * SameSite=Lax, so it rides a top-level navigation (the operator
+ * clicking the link) but not a cross-site fetch. The Origin check
+ * on the server refuses a state-changing request that did not come
+ * from this origin, so the combination is what protects the API.
+ *
+ * If the cookie is missing -- the operator opened the page
+ * directly rather than through the session link -- the API calls
+ * come back 401. The UI says so instead of showing an empty
+ * dashboard that looks like an idle system. */
+
+async function apiFetch(path, options) {
+  const opts = options || {};
+  opts.credentials = 'same-origin';
+  opts.headers = opts.headers || {};
+  return fetch(path, opts);
+}
+
+/* stripSessionToken removes the token from the address bar.
+ *
+ * The server already redirects to the clean URL after the
+ * handshake, so this is a belt-and-braces measure for a browser
+ * that restores the original URL from history. */
+
+function stripSessionToken() {
+  if (!window.location.search) return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has('token')) return;
+  url.searchParams.delete('token');
+  window.history.replaceState({}, '', url.pathname + url.search);
+}
+
 /* ---------- connection ---------- */
 
 let es = null;
 let retry = 0;
+/* sessionChecked guards the one-off 401 probe below, so a
+ * reconnect loop does not hammer the API for a session that is
+ * not coming back. */
+let sessionChecked = false;
 
 function connect() {
   if (es) { es.close(); }
@@ -40,9 +92,20 @@ function connect() {
     const snap = JSON.parse(e.data);
     state.agents = snap.agents || [];
     state.messages = snap.messages || [];
+    state.approvals = snap.approvals || [];
+    state.canResolveApprovals = !!snap.can_resolve_approvals;
     if (snap.layout) { state.layout = snap.layout; renderLayout(); }
     render();
     setConn('live');
+  });
+
+  // The approval list arrives as a whole list, not a delta: a
+  // grant and a deny can land in the same tick, and merging
+  // per-id updates on the client is where a stale "approve"
+  // button survives its own decision.
+  es.addEventListener('approvals', (e) => {
+    state.approvals = JSON.parse(e.data) || [];
+    renderApprovals();
   });
 
   es.addEventListener('agent', (e) => {
@@ -70,6 +133,16 @@ function connect() {
   es.addEventListener('error', () => {
     setConn('lost');
     es.close();
+    // A refused stream is the shape a missing session takes:
+    // the server answers 401 and closes rather than holding the
+    // connection open. Say so plainly instead of reconnecting
+    // forever against a server that will keep refusing.
+    if (es.readyState === 2 /* CLOSED */ && !sessionChecked) {
+      sessionChecked = true;
+      apiFetch('/api/state')
+        .then((r) => { if (r.status === 401) showSessionExpired(); })
+        .catch(() => {});
+    }
     // Back off, but cap it: a server that comes back after a
     // restart should be picked up quickly.
     const wait = Math.min(1000 * Math.pow(1.5, retry++), 10000);
@@ -83,14 +156,111 @@ function setConn(stateName) {
   el.textContent = stateName === 'live' ? 'live' : stateName;
 }
 
+/* showSessionExpired tells the operator the session is gone.
+ *
+ * The UI sits behind a session token. If the cookie is missing or
+ * stale -- the operator opened the page without going through the
+ * session link, or the server restarted and minted a new token --
+ * every API call comes back 401. Without this, the dashboard
+ * would sit there empty and look exactly like an idle system,
+ * which is the worst possible reading of "nothing is happening".
+ *
+ * The remedy is in the message: the link the server printed. */
+function showSessionExpired() {
+  setConn('lost');
+  const el = $('#conn');
+  el.textContent = 'session expired';
+  el.title = 'Open the link the aios command printed to start a new session.';
+}
+
 /* ---------- rendering ---------- */
 
 function render() {
   renderLayout();
   renderAgents();
+  renderApprovals();
   renderComms();
   renderAudit();
   refreshAgentSelects();
+}
+
+/* ---------- approvals ---------- */
+
+/* renderApprovals draws the queue of decisions waiting on a
+ * human.
+ *
+ * The card leads with the target, not the id. An operator is
+ * being asked to authorize a specific command or path, and
+ * "allow apr-3f9c…" asks them to consent to a string. The id
+ * is still shown (it is the handle for `aios approve`), but it
+ * is the least important thing on the card. */
+function renderApprovals() {
+  const body = $('[data-panel="approvals"] [data-role="body"]');
+  if (!body) return;
+
+  const count = $('[data-panel="approvals"] [data-role="count"]');
+  if (count) count.textContent = state.approvals.length || '';
+
+  if (!state.approvals.length) {
+    body.innerHTML = '<p class="empty">Nothing waiting for approval.</p>';
+    return;
+  }
+
+  body.innerHTML = '';
+  for (const a of state.approvals) {
+    const node = $('#approval-card').content.firstElementChild.cloneNode(true);
+    $('.approval-action', node).textContent = a.action || 'action';
+    $('.approval-task', node).textContent = a.task_id ? ('task ' + a.task_id) : (a.id || '');
+    $('.approval-target', node).textContent = a.target || '(no target)';
+    const reason = $('.approval-reason', node);
+    reason.textContent = a.reason || '';
+    reason.hidden = !a.reason;
+
+    const note = $('.approval-note', node);
+    if (state.canResolveApprovals) {
+      const yes = $('[data-role="approve"]', node);
+      const no = $('[data-role="deny"]', node);
+      yes.addEventListener('click', () => decide(a.id, true, node));
+      no.addEventListener('click', () => decide(a.id, false, node));
+    } else {
+      // This process does not own the approvals. Say where to
+      // go instead of offering a button that will fail.
+      $('.approval-actions', node).remove();
+      note.textContent = 'Decide with `aios approve ' + (a.id || '<id>') +
+        '`, or at the run terminal.';
+    }
+    body.appendChild(node);
+  }
+}
+
+async function decide(id, approve, node) {
+  const note = $('.approval-note', node);
+  // Disable both buttons immediately: a double-click on "Allow
+  // once" would otherwise POST twice, and the second POST is a
+  // 409 on an approval that is already granted.
+  $('.approval-actions button', node).forEach((b) => { b.disabled = true; });
+  note.textContent = approve ? 'allowing…' : 'denying…';
+  try {
+    const res = await apiFetch('/api/approvals/' + encodeURIComponent(id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approve: approve }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      note.textContent = 'failed: ' + (data.error || res.statusText);
+      $('.approval-actions button', node).forEach((b) => { b.disabled = false; });
+      return;
+    }
+    // Drop it locally too: the SSE event will confirm, but
+    // waiting for a round trip leaves a decided approval on
+    // screen inviting a second click.
+    state.approvals = state.approvals.filter((x) => x.id !== id);
+    renderApprovals();
+  } catch (err) {
+    note.textContent = 'failed: ' + err.message;
+    $('.approval-actions button', node).forEach((b) => { b.disabled = false; });
+  }
 }
 
 /* Applies the saved layout: panel order, width, visibility.
@@ -333,7 +503,7 @@ async function saveLayout() {
   const el = $('#save-state');
   el.textContent = 'saving…';
   try {
-    const res = await fetch('/api/layout', {
+    const res = await apiFetch('/api/layout', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state.layout),
@@ -362,7 +532,7 @@ function wireCompose() {
     const body = $('[data-role="body"]', form);
     if (!body.value.trim()) return;
     if (!from.value) { body.focus(); return; }
-    const res = await fetch('/api/messages', {
+    const res = await apiFetch('/api/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: from.value, to: to.value, body: body.value }),
@@ -375,6 +545,7 @@ function wireCompose() {
 /* ---------- boot ---------- */
 
 function boot() {
+  stripSessionToken();
   $('#layout-toggle').addEventListener('click', () => {
     const ed = $('#editor');
     ed.hidden = !ed.hidden;
@@ -383,7 +554,7 @@ function boot() {
   $('#reset-layout').addEventListener('click', async () => {
     // Ask the server for the default rather than guessing it
     // here, so the two definitions cannot drift.
-    const res = await fetch('/api/layout', {
+    const res = await apiFetch('/api/layout', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),

@@ -189,15 +189,26 @@ type Hub struct {
 	// optional: a hub with no store keeps the layout in memory
 	// only, which is what a test or a throwaway server wants.
 	store *LayoutStore
+
+	// approvals holds the pending approval requests an operator
+	// can decide from the browser.
+	//
+	// This is the one place the UI does more than read. It is
+	// safe because the registry forwards every decision to
+	// whichever process owns the approvals rather than
+	// deciding anything itself, so there is still exactly one
+	// source of truth for run state.
+	approvals *approvalRegistry
 }
 
 // NewHub returns an empty hub with the default layout.
 func NewHub() *Hub {
 	return &Hub{
-		agents:   map[string]*Agent{},
-		subs:     map[int]chan event{},
-		msgLimit: DefaultMsgLimit,
-		layout:   DefaultLayout(),
+		agents:    map[string]*Agent{},
+		subs:      map[int]chan event{},
+		msgLimit:  DefaultMsgLimit,
+		layout:    DefaultLayout(),
+		approvals: newApprovalRegistry(nil),
 	}
 }
 
@@ -417,6 +428,81 @@ func (h *Hub) SetStore(s *LayoutStore) error {
 	return nil
 }
 
+// AddApproval records a pending approval and notifies
+// subscribers, so an open browser sees the request without
+// waiting for its next poll.
+func (h *Hub) AddApproval(a PendingApproval) {
+	if h == nil {
+		return
+	}
+	h.approvals.Add(a)
+	h.mu.Lock()
+	h.version++
+	h.mu.Unlock()
+	h.broadcast(mustEvent("approvals", h.approvals.Pending()))
+}
+
+// RemoveApproval clears a pending approval and notifies
+// subscribers.
+func (h *Hub) RemoveApproval(id string) {
+	if h == nil {
+		return
+	}
+	if !h.approvals.Has(id) {
+		return
+	}
+	h.approvals.Remove(id)
+	h.mu.Lock()
+	h.version++
+	h.mu.Unlock()
+	h.broadcast(mustEvent("approvals", h.approvals.Pending()))
+}
+
+// PendingApprovals returns the approval requests waiting on a
+// decision, oldest first.
+func (h *Hub) PendingApprovals() []PendingApproval {
+	if h == nil {
+		return nil
+	}
+	return h.approvals.Pending()
+}
+
+// CanResolveApprovals reports whether this hub can apply a
+// decision. False means the UI must point the operator
+// somewhere else rather than showing a button that cannot
+// work.
+func (h *Hub) CanResolveApprovals() bool {
+	if h == nil {
+		return false
+	}
+	return h.approvals.CanResolve()
+}
+
+// SetApprovalResolver attaches the owner of the approvals, so
+// a decision made in the browser reaches the run.
+func (h *Hub) SetApprovalResolver(r ApprovalResolver) {
+	if h == nil {
+		return
+	}
+	h.approvals.SetResolver(r)
+}
+
+// DecideApproval applies an operator's decision.
+func (h *Hub) DecideApproval(id string, approve bool) (string, error) {
+	if h == nil {
+		return "", ErrNoResolver
+	}
+	state, err := h.approvals.Decide(id, approve)
+	if err != nil {
+		return "", err
+	}
+	h.mu.Lock()
+	h.version++
+	h.mu.Unlock()
+	h.broadcast(mustEvent("approvals", h.approvals.Pending()))
+	return state, nil
+}
+
 // subscribe registers a listener and returns the channel
 // plus a cancel func.
 //
@@ -480,6 +566,16 @@ type Snapshot struct {
 	Agents   []Agent   `json:"agents"`
 	Messages []Message `json:"messages"`
 	Layout   Layout    `json:"layout"`
+	// Approvals are the requests waiting on an operator
+	// decision. Always present, never null: the UI checks
+	// length, and a null that is sometimes an array is a
+	// footgun in JavaScript.
+	Approvals []PendingApproval `json:"approvals"`
+	// CanResolveApprovals says whether this server can apply a
+	// decision. False means an operator must resolve at the
+	// terminal or over the daemon, and the UI must not offer
+	// buttons that cannot work.
+	CanResolveApprovals bool `json:"can_resolve_approvals"`
 	// Version increases by one on every mutation, so a client
 	// can tell "the snapshot I hold is current" from "the
 	// world moved on".
@@ -507,10 +603,12 @@ func (h *Hub) Snapshot() Snapshot {
 	msgs := make([]Message, len(h.msgs))
 	copy(msgs, h.msgs)
 	return Snapshot{
-		Agents:   agents,
-		Messages: msgs,
-		Layout:   h.layout,
-		Version:  h.version,
+		Agents:              agents,
+		Messages:            msgs,
+		Layout:              h.layout,
+		Approvals:           h.approvals.Pending(),
+		CanResolveApprovals: h.approvals.CanResolve(),
+		Version:             h.version,
 	}
 }
 

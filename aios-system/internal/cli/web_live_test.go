@@ -34,6 +34,15 @@ func freeAddr(t *testing.T) string {
 	return addr
 }
 
+// liveTestToken is the session token the live UI runs with.
+//
+// The UI refuses an unauthenticated request, so the test pins the
+// token in the environment and presents it on every call. Pinning
+// it (rather than scraping it out of the printed URL) is what an
+// operator does too, and it keeps the test independent of how the
+// URL happens to be formatted.
+const liveTestToken = "live-test-token"
+
 // waitForServer polls until the server answers, or fails.
 //
 // runRun sleeps 150ms before starting the plan so the URL it
@@ -44,7 +53,12 @@ func waitForServer(t *testing.T, base string) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		c := &http.Client{Timeout: 500 * time.Millisecond}
-		resp, err := c.Get(base + "/api/state")
+		req, err := http.NewRequest(http.MethodGet, base+"/api/state", nil)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		req.Header.Set(webui.TokenHeader, liveTestToken)
+		resp, err := c.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 			return
@@ -57,7 +71,12 @@ func waitForServer(t *testing.T, base string) {
 func httpGet(t *testing.T, url string) ([]byte, int) {
 	t.Helper()
 	c := &http.Client{Timeout: 3 * time.Second}
-	resp, err := c.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set(webui.TokenHeader, liveTestToken)
+	resp, err := c.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
@@ -132,6 +151,7 @@ func webTestDepsWithWorker(t *testing.T, log *audit.Log, w runtime.Worker) *Deps
 // into a hub the UI can serve, and that the UI served it over
 // HTTP.
 func TestRunRun_WebPublishesLiveState(t *testing.T) {
+	t.Setenv(webui.EnvToken, liveTestToken)
 	log := openTestAudit(t)
 	addr := freeAddr(t)
 

@@ -49,7 +49,7 @@ func (r RunShellTool) Run(args map[string]any, ctx Context) (Result, error) {
 
 	runner := r.Runner
 	if runner == nil {
-		runner = sandbox.NewSubprocessRunner()
+		runner = sandbox.DefaultRunner()
 	}
 	res, err := runner.Run(sandbox.RunOptions{
 		Command: cmd,

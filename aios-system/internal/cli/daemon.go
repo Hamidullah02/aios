@@ -244,8 +244,8 @@ func (d *Daemon) handle(ctx context.Context, conn net.Conn) {
 	}
 }
 
-// dispatch is the request router. The four kinds the doc
-// set names are: request, grant, deny, wait.
+// dispatch is the request router. The kinds are: request,
+// grant, deny, wait, and list.
 func (d *Daemon) dispatch(ctx context.Context, msg map[string]any) map[string]any {
 	kind, _ := msg["kind"].(string)
 	id, _ := msg["id"].(string)
@@ -259,9 +259,37 @@ func (d *Daemon) dispatch(ctx context.Context, msg map[string]any) map[string]an
 		return d.handleDeny(ctx, id, actor, msg)
 	case "wait":
 		return d.handleWait(ctx, id)
+	case "list":
+		// The doc set names only the four request verbs. `list`
+		// was added for the operator UI: a browser in its own
+		// process cannot see the daemon's approvals any other
+		// way, and showing an operator a queue they cannot
+		// populate is the gap v0.42.0 was about.
+		return d.handleList()
 	default:
 		return map[string]any{"ok": false, "error": "unknown kind: " + kind}
 	}
+}
+
+// handleList returns every pending approval.
+func (d *Daemon) handleList() map[string]any {
+	if d.approvals == nil {
+		return map[string]any{"ok": false, "error": "approvals service is not configured"}
+	}
+	pending := d.approvals.Pending()
+	out := make([]map[string]any, 0, len(pending))
+	for _, a := range pending {
+		out = append(out, map[string]any{
+			"id":     a.ID,
+			"actor":  a.Actor,
+			"action": a.Payload.Action,
+			"target": a.Payload.Target,
+			"reason": a.Payload.Reason,
+			"task":   a.Payload.RequesterID,
+			"state":  string(a.State),
+		})
+	}
+	return map[string]any{"ok": true, "approvals": out}
 }
 
 func (d *Daemon) handleRequest(_ context.Context, id, actor string, msg map[string]any) map[string]any {

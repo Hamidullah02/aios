@@ -59,6 +59,34 @@
   </section>
 </template>
 
+<template id="panel-approvals">
+  <section class="panel" data-panel="approvals">
+    <header class="panel-head">
+      <h2>Approvals</h2>
+      <span class="count" data-role="count"></span>
+    </header>
+    <div class="panel-body approvals" data-role="body">
+      <p class="empty">Nothing waiting for approval.</p>
+    </div>
+  </section>
+</template>
+
+<template id="approval-card">
+  <article class="approval">
+    <header>
+      <span class="approval-action"></span>
+      <span class="approval-task"></span>
+    </header>
+    <pre class="approval-target"></pre>
+    <p class="approval-reason"></p>
+    <div class="approval-actions">
+      <button class="btn primary" type="button" data-role="approve">Allow once</button>
+      <button class="btn danger" type="button" data-role="deny">Deny</button>
+    </div>
+    <p class="approval-note"></p>
+  </article>
+</template>
+
 <template id="panel-comms">
   <section class="panel" data-panel="comms">
     <header class="panel-head">

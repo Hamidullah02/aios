@@ -11,28 +11,27 @@ import (
 )
 
 // newTestServer returns a server backed by a fresh hub.
+//
+// The token is pinned so the suite can authenticate deterministically;
+// the auth boundary itself is covered in auth_test.go.
 func newTestServer(t *testing.T) (*Server, *Hub) {
 	t.Helper()
 	hub := NewHub()
-	s, err := New(Config{Hub: hub, Addr: "127.0.0.1:0"})
+	s, err := New(Config{Hub: hub, Addr: "127.0.0.1:0", Token: testToken})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return s, hub
 }
 
-// do runs a request against the server's handler.
+// do runs an authenticated request against the server's handler.
+//
+// Every request carries the session token and a Host header the
+// server answers to: the UI refuses both otherwise.
 func do(t *testing.T, s *Server, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	var r *http.Request
-	if body == "" {
-		r = httptest.NewRequest(method, path, nil)
-	} else {
-		r = httptest.NewRequest(method, path, strings.NewReader(body))
-		r.Header.Set("Content-Type", "application/json")
-	}
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, r)
+	s.Handler().ServeHTTP(w, authRequest(method, path, body))
 	return w
 }
 
@@ -125,8 +124,8 @@ func TestSPAHandler_ClientRoutesStillGetTheShell(t *testing.T) {
 func TestSPAHandler_StaticAssetsStillServe(t *testing.T) {
 	s, _ := newTestServer(t)
 	for p, want := range map[string]string{
-		"/app.js":   "javascript",
-		"/app.css":  "css",
+		"/app.js":  "javascript",
+		"/app.css": "css",
 	} {
 		w := do(t, s, http.MethodGet, p, "")
 		if w.Code != http.StatusOK {
@@ -513,7 +512,7 @@ func TestHub_ConcurrentUse(t *testing.T) {
 // returns.
 func TestEvents_StreamsSnapshotAndDeltas(t *testing.T) {
 	s, hub := newTestServer(t)
-	r := httptest.NewRequest("GET", "/api/events", nil)
+	r := authRequest("GET", "/api/events", "")
 	ctx, cancel := contextWithCancel()
 	r = r.WithContext(ctx)
 
@@ -559,7 +558,7 @@ func TestEvents_StreamsSnapshotAndDeltas(t *testing.T) {
 // ServeHTTP is precisely what waits for the cancel.
 func TestEvents_ContentType(t *testing.T) {
 	s, _ := newTestServer(t)
-	r := httptest.NewRequest("GET", "/api/events", nil)
+	r := authRequest("GET", "/api/events", "")
 	ctx, cancel := contextWithCancel()
 	r = r.WithContext(ctx)
 

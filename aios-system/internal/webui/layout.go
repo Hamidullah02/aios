@@ -17,6 +17,13 @@ const (
 	PanelComms PanelID = "comms"
 	// PanelAudit is the audit-log tail.
 	PanelAudit PanelID = "audit"
+	// PanelApprovals is the queue of gated tool calls waiting
+	// on an operator decision.
+	//
+	// It is first in the default order, above the agents grid:
+	// an approval is the only item on this UI that is BLOCKED
+	// on a human, so it outranks the read-only panels.
+	PanelApprovals PanelID = "approvals"
 )
 
 // AllPanels lists every panel the UI knows about, in the
@@ -27,7 +34,7 @@ const (
 // than silently ignored, so a typo surfaces immediately
 // instead of producing a UI with a mysteriously missing
 // panel.
-var AllPanels = []PanelID{PanelAgents, PanelComms, PanelAudit}
+var AllPanels = []PanelID{PanelApprovals, PanelAgents, PanelComms, PanelAudit}
 
 // KnownPanel reports whether id names a real panel.
 func KnownPanel(id PanelID) bool {
@@ -79,14 +86,16 @@ type Layout struct {
 }
 
 // DefaultLayout returns the layout used before an operator
-// has customised anything: every panel visible, agents
-// spanning half the grid.
+// has customised anything: every panel visible, approvals
+// first because they are the only thing that can be blocked on
+// the operator.
 func DefaultLayout() Layout {
 	return Layout{
 		Panels: []PanelState{
-			{ID: PanelAgents, Visible: true, Order: 0, Width: 12},
-			{ID: PanelComms, Visible: true, Order: 1, Width: 6},
-			{ID: PanelAudit, Visible: true, Order: 2, Width: 6},
+			{ID: PanelApprovals, Visible: true, Order: 0, Width: 12},
+			{ID: PanelAgents, Visible: true, Order: 1, Width: 12},
+			{ID: PanelComms, Visible: true, Order: 2, Width: 6},
+			{ID: PanelAudit, Visible: true, Order: 3, Width: 6},
 		},
 	}
 }
@@ -141,17 +150,37 @@ func (l Layout) Normalize() (Layout, error) {
 		seen[p.ID] = true
 		out = append(out, clampPanel(p))
 	}
-	// Add any panel the layout did not mention.
+	// Renumber the panels the layout DID name. An operator's
+	// saved orders are dense by the time it reaches us (0, 1,
+	// 2, ...), so when a new panel is appended below its
+	// default order can collide with one already in use. Two
+	// panels sharing an order is not an error here, but the
+	// tie-break sorts them alphabetically, which silently
+	// demotes the panel an operator most needs to see: a
+	// saved layout with agents at 0 and a newly-added
+	// approvals also at 0 puts "agents" first.
+	maxOrder := -1
+	for _, p := range out {
+		if p.Order > maxOrder {
+			maxOrder = p.Order
+		}
+	}
+	// Add any panel the layout did not mention, after
+	// everything the operator placed, so a new panel appears at
+	// the bottom rather than fighting for an occupied slot.
 	for _, id := range AllPanels {
 		if seen[id] {
 			continue
 		}
-		def := DefaultLayout()
-		for _, p := range def.Panels {
-			if p.ID == id {
-				out = append(out, p)
+		maxOrder++
+		p := PanelState{ID: id, Visible: true, Order: maxOrder, Width: 6}
+		for _, d := range DefaultLayout().Panels {
+			if d.ID == id {
+				p.Width = d.Width
+				break
 			}
 		}
+		out = append(out, p)
 	}
 	// Sort by the caller's Order, breaking ties on ID so
 	// the result is deterministic. This is an insertion

@@ -99,6 +99,19 @@ type Args struct {
 	// names a socket is asking for the daemon, while one who
 	// never mentioned it is at a terminal.
 	SocketExplicit bool
+	// EgressMode is the network enforcement mode for the run.
+	//
+	// The default is EgressModeProxy: subprocess traffic goes
+	// through the egress proxy and the allow list in
+	// var/egress.yaml decides what is reachable. A workspace
+	// with no egress.yaml therefore has an empty allow list,
+	// which denies everything -- fail closed, not fail open.
+	//
+	// EgressModeDenyAll blocks subprocess network access
+	// outright. EgressModeOff removes the policy, and is only
+	// appropriate when the operator is deliberately testing
+	// the tools against the network.
+	EgressMode string
 }
 
 // Parse parses argv into Args. argv[0] is the program name
@@ -155,6 +168,7 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	fs.StringVar(&a.SocketPath, "socket", DefaultSocketPath(), "approval daemon socket path")
 	fs.BoolVar(&a.AssumeYes, "yes", false, "auto-approve gated tool calls instead of prompting (no human sees each request)")
 	fs.StringVar(&a.DaemonPID, "pidfile", "./var/aios-daemon.pid", "path to the daemon pid file")
+	fs.StringVar(&a.EgressMode, "egress", EgressModeProxy, "network enforcement for subprocesses: proxy (allow-list enforced), deny (no network), off (no policy)")
 	// --format and --tail are subcommand-specific and
 	// registered on the per-subcommand FlagSet.
 

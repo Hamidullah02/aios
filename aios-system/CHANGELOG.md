@@ -1,5 +1,270 @@
 # Changelog
 
+## v0.45.0 — the child process can no longer reach the network behind your back
+
+The pitch for this project is "security enforced by the environment,
+not by prompts". For the egress half of that claim, the environment
+enforced nothing.
+
+**Before this version the egress proxy was dead code in production.**
+`internal/egress/proxy.go` implemented an HTTP allow-list proxy, and
+`internal/egress/proxy_test.go` tested it thoroughly. But nothing in
+the production path ever constructed one. The allow list was loaded
+from `var/egress.yaml`, stored on `Deps.Egress`, and never consulted
+again — the `buildRouter` doc comment said so outright ("a future
+hook the router will honour; the current implementation does not
+enforce it"). Meanwhile the tools that actually run commands went
+straight to `os/exec`. A gated `run_shell` that an operator approved
+could `curl` any host, `pip install` from PyPI, or `git push` to a
+remote, and the allow list never saw any of it.
+
+**Three things were missing, and all three had to be fixed.**
+
+**One: the proxy could not police HTTPS.** A proxy that only
+handles absolute-URL requests sees plain HTTP and nothing else. Every
+HTTPS client opens a tunnel with `CONNECT`, and the old proxy had no
+`CONNECT` branch, so a `CONNECT example.com:443` fell through to the
+absolute-URL parser and was rejected as malformed. That is not a
+security feature: it means the allow list had no effect on TLS
+traffic at all, and TLS is most of the traffic.
+
+`Proxy.serveConnect` now handles the tunnel method. It checks the
+allow list against the CONNECT authority *before* dialling anything,
+hijacks the connection, answers `200 Connection Established`, and
+copies bytes both ways. The decision is made on the host the client
+asked for, because once a tunnel is open the proxy cannot see inside
+it — that is what TLS is for. The proxy enforces *which host* is
+reachable, not *what the client says* once it gets there.
+
+**Two: nothing forced the child through the proxy.** A proxy nobody
+is sent to enforces nothing, and a child that could read
+`HTTP_PROXY` out of its own environment could pick a different one.
+
+`internal/sandbox/network.go` adds `NetworkPolicy`. In proxy mode it
+sets `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and their lowercase
+spellings to the proxy, and — this is the part that matters — it
+*removes* every proxy variable the parent environment carried. A
+second proxy in the environment is an escape hatch, so the policy
+rewrites the environment rather than adding to it. The policy also
+applies to the inherited environment, not just to the caller's map:
+`run_tests` inherits the parent environment, and an inherited
+`HTTPS_PROXY` would otherwise have survived.
+
+**Three: the policy had to reach every subprocess.** The git tools,
+the search diagnostics, the shell tool and the test runner each
+fall back to their own runner when a caller does not supply one, so
+a policy applied only at the explicit construction sites would have
+been silently absent from every fallback. `sandbox.DefaultRunner` is
+now the process-wide default and `sandbox.SetDefaultRunner` swaps it;
+`internal/cli/egress_guard.go` starts the proxy and installs the
+policy on it once, at startup.
+
+**The modes.** `--egress=proxy` (the default) routes subprocess
+traffic through the proxy and lets `var/egress.yaml` decide.
+`--egress=deny` blocks subprocess network access outright, pointing
+the child at a black hole. `--egress=off` removes the policy.
+
+**The default fails closed.** A workspace with no `var/egress.yaml`
+gets an empty allow list, and an empty allow list denies everything.
+The proxy refuses every host, including the ones a run needs. That
+is the correct default for a safety feature and it will surprise
+people: the first thing a new user hits is a build that cannot
+download its dependencies. The fix is one line in `var/egress.yaml`,
+and it is written down in the README.
+
+**What this still does not do.** It is not a firewall, and it would
+be dishonest to call it one. A child that ignores `HTTP_PROXY`, opens
+a raw socket, or speaks a protocol other than HTTP is not stopped by
+the proxy. The enforcement depends on the child cooperating with the
+proxy variables, which is the same cooperation the environment
+cleanup asks for in the first place. Real isolation — namespaces,
+containers, a restricted token on Windows — is a separate piece of
+work and is not in this version. The honest statement today is: *a
+well-behaved child in a gated tool call can only reach the hosts you
+listed*, not *a child cannot reach the network*.
+
+**Tests.** `internal/egress/connect_test.go` covers the tunnel: an
+allowed host gets a working tunnel and the bytes survive intact, a
+denied host gets 403 and no socket, the deny list wins over the
+allow list, an empty allow list refuses everything, an unreachable
+upstream gets 502 rather than a hang, and a real `http.Client`
+completes a TLS handshake through the tunnel to a self-signed
+server. `internal/sandbox/network_test.go` covers the policy: the
+proxy variables are set, an inherited proxy is removed, the deny
+mode black-holes, an inherited environment survives the policy, and
+an invalid policy fails before the child starts.
+`internal/cli/egress_guard_test.go` covers the wiring: the policy
+names the port the proxy actually bound to, the default runner
+carries it, `Close` restores the previous runner, and a request
+through the guard's proxy to a host that is not on the list is
+refused with 403.
+
+## v0.44.0 — the operator UI has a session
+
+v0.43.0 gave the UI the ability to resolve an approval. That
+made the UI worth attacking: an endpoint that can grant a gated
+tool call is a capability, and every endpoint on it was open to
+anything that could reach the port.
+
+**Before this version the UI had no authentication at all.**
+`POST /api/messages`, `PUT /api/layout`, `POST
+/api/agents/{id}/status` and `POST /api/approvals/{id}` were
+reachable by any local process, any page in any browser on the
+machine, and any DNS name that could be pointed at 127.0.0.1. The
+loopback default narrowed the exposure but did not close it:
+loopback is reachable from every process on the box and from every
+browser tab, and DNS rebinding reaches loopback with a Host header
+the server never checked.
+
+**The session token.** The server now mints a random 256-bit
+token per process and requires it on every request, including the
+static assets and the SPA shell. There is no "no auth" mode: a
+server that cannot mint a token refuses to start. The token can be
+pinned with `AIOS_WEB_TOKEN` (or `webui.Config.Token`), which is
+what a headless operator or a test wants.
+
+The token travels two ways:
+
+- In a header (`X-Aios-Token`) for scripts and CLIs.
+- In a cookie for browsers. The cookie is `HttpOnly` (no page
+  script can read it) and `SameSite=Lax`, so it rides the
+  top-level navigation an operator makes when they click the
+  link the command printed, but not a cross-site fetch.
+
+**The handshake.** The command prints a URL carrying the token
+once. The first request trades it for the cookie and redirects to
+the clean URL, so the token does not sit in the address bar or in
+a copied link. The token is never accepted from the query string
+on a state-changing request, because a redirect cannot carry a
+body and the request would be silently dropped.
+
+**The Host check.** A request whose `Host` header is not one the
+server answers to is refused with 400 before any handler sees
+it. This is the DNS-rebinding defence: a rebound name resolves
+to 127.0.0.1, so the browser connects to this server but sends
+`Host: attacker.example`. The server answers to `localhost`,
+`127.0.0.1`, `::1`, its own bind host, and any name the
+operator adds through `webui.Config.AllowedHosts`.
+
+**The Origin check.** A state-changing request whose `Origin`
+header is not this server's own origin is refused with 403. The
+cookie alone is not enough: a browser that holds the cookie
+attaches it to requests the page makes, so the origin is what says
+"this request came from us". Reads are not origin-checked -- a
+cross-origin GET is harmless without CORS headers, and the SSE
+stream needs to keep working.
+
+**Hardening headers.** Every response carries a strict
+`Content-Security-Policy` (`default-src 'none'`, no
+`unsafe-inline`), `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and the
+two cross-origin isolation headers. The UI has no inline script
+and no external resource, so the policy can be strict.
+
+**Other changes.** The server now binds its listener before the
+command prints a URL, so the printed address is the one the
+browser can reach (it used to print the configured address, which
+is wrong when the port is 0). `run --web` no longer fails the
+plan when the UI cannot bind: the run continues without the UI and
+says why. The client strips the token from the address bar and
+reports an expired session instead of showing an empty dashboard
+that looks like an idle system.
+
+**Tests.** `internal/webui/auth_test.go` covers the boundary:
+unauthenticated requests refused on every route, the header and
+cookie paths, the handshake and its redirect, a foreign Host
+refused, a cross-origin mutation refused, a same-origin mutation
+allowed, and the security headers present.
+
+## v0.43.0 — approve from the browser
+
+v0.42.0 made approvals resolvable at a terminal. The web UI
+still could not resolve one. It reported
+`blocked / waiting_for_approval` and offered no way to act, so
+the panel an operator is most likely to open when a run stalls
+was the one panel that could not help. That comment in
+`server.go` ("nothing in the UI can start or stop a plan")
+was correct when written and wrong the moment an approval
+became the only thing blocking a run.
+
+**The approvals panel.** A new panel leads the default layout,
+above the agents grid, because an approval is the only item on
+this UI that is blocked on a human. Each card leads with the
+**target** — the command or path — not the approval id. An
+operator asked to authorize `rm -rf /` has to see `rm -rf /`;
+the id is the handle for `aios approve`, not the thing being
+consented to.
+
+**Two new endpoints.**
+
+- `GET /api/approvals` — the pending queue, plus
+  `can_resolve`.
+- `POST /api/approvals/{id}` with `{"approve": true|false}`.
+
+`approve` is a required field rather than a default. Treating a
+missing field as `false` would silently **deny** on a malformed
+request, stopping a run nobody asked to stop.
+
+**Two ways to decide, one owner of run state.**
+
+- `aios run --web` — the handler parks the request in the hub
+  and blocks on a channel; the HTTP handler hands the decision
+  back through it. Same process, so no indirection.
+- `aios web` — a separate process with no approvals of its
+  own. It polls a new daemon `list` verb and forwards decisions
+  to the daemon. When no daemon is reachable the panel says
+  where to decide instead of showing a button that cannot work:
+  **an approve control that fails is worse than none**.
+
+The registry never decides anything itself. It records what is
+pending and forwards the choice to whichever process owns the
+approvals, so there is still exactly one source of truth for
+run state — the reason this server originally had no approval
+endpoints at all.
+
+**Status mapping matters.** `503` when this server cannot
+resolve (a configuration problem, not a bad request) and `404`
+for a stale tab, so an operator can tell "open the right
+command" from "this is already decided".
+
+**A refused decision keeps the card.** If the grant is
+refused — binding mismatch, already decided — the item stays on
+screen with the reason. Making it vanish would hide a real
+failure behind an apparently clean queue.
+
+### Two bugs found by running it, not by testing it
+
+**The prompt pointed at the wrong port.** `--web-addr` was
+respected by the listener but ignored by the hint the approval
+prompt printed, so an operator whose run was on `:8761` was
+told to open `:7755` — a port with nothing on it. The handler
+is now built after the server so it carries the address the
+listener actually bound to.
+
+**A new panel silently lost its place.** A layout saved before
+the approvals panel existed has `agents` at order 0. The
+appended `approvals` panel inherited its default order — also 0
+— and the alphabetical tie-break then sorted `agents` first,
+demoting the panel that matters most. Appended panels now land
+after the highest order already in use.
+
+### Verification
+
+Driven end to end against a real run, not a mock: a gated
+`run_shell` plan with `--web`, the approval listed via the API,
+granted with one POST, `Stopped: completed`, exit 0. The deny
+path exits 1 with `operator denied`; a second click returns
+404; a run with nobody in the browser stops rather than
+granting.
+
+`go test -race` could not run: it needs cgo and there is no C
+compiler on this machine (`gcc` not found). The concurrent
+path is instead covered by a stress test that drives eight
+simultaneous approvals while four goroutines hammer the hub,
+which fails loudly under the runtime's own map guard if the
+locking is wrong. That is weaker than the race detector and is
+called out as such — run `-race` on a machine with a C
+compiler before trusting this area.
 ## v0.42.0 — approvals a human can actually answer
 
 The default policy gates `run_shell` with `ask`, and the
