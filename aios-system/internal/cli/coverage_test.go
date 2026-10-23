@@ -137,9 +137,9 @@ func TestCoverage_RunResume_MissingArgs(t *testing.T) {
 }
 
 func TestCoverage_RunCancel_NoTaskID(t *testing.T) {
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	args := &Args{Command: CmdCancel}
-	code := runCancel(args, &Deps{}, &stderr)
+	code := runCancel(args, &Deps{}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatal("expected non-zero")
 	}
@@ -356,14 +356,21 @@ func TestCoverage_RunDaemonStart_DefaultPaths(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- RunDaemonStart(ctx, DaemonConfig{}) }()
+	// The default socket path is platform-dependent
+	// (DefaultSocketPath), so the assertion has to ask the
+	// helper rather than hardcode a POSIX path: on Windows
+	// "/tmp/aios-approval.sock" is not a valid location and
+	// the assertion could never pass.
+	sock := DefaultSocketPath()
+	t.Cleanup(func() { _ = os.Remove(sock) })
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, err := os.Stat("/tmp/aios-approval.sock"); err == nil {
+		if _, err := os.Stat(sock); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
 			cancel()
-			t.Fatal("default socket did not appear")
+			t.Fatalf("default socket did not appear at %s", sock)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -1034,22 +1041,73 @@ func TestCoverage_Init_InvalidDir(t *testing.T) {
 	}
 }
 
-// --- SortBySequence direct test ---
+// --- Log.Recent ordering ---
 
-func TestCoverage_SortBySequence_Direct(t *testing.T) {
-	// Direct call to exercise the swap branch.
-	rows := []audit.PersistedRow{
-		{SequenceNumber: 5},
-		{SequenceNumber: 1},
-		{SequenceNumber: 3},
-		{SequenceNumber: 2},
-		{SequenceNumber: 4},
+// TestCoverage_Audit_Recent_IncludesEveryKind is the guard for
+// the bug that made `aios audit` silently lossy: the no-taskID
+// path used to union a hardcoded list of "well known" kinds, and
+// policy_decision was not on it. Recent() has no kind filter at
+// all, so the test writes rows of a kind the old list never
+// mentioned and asserts they come back.
+func TestCoverage_Audit_Recent_IncludesEveryKind(t *testing.T) {
+	log := openTestAudit(t)
+	defer log.Close()
+	for _, kind := range []string{"task_started", "policy_decision", "a_kind_added_next_release"} {
+		if _, err := log.Write(&audit.Row{
+			TaskID: "t-recent", Kind: kind, Actor: "tester",
+			Payload: map[string]any{"k": kind},
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	sortBySequence(rows)
+	rows, err := log.Recent(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, r := range rows {
+		seen[r.Kind] = true
+	}
+	for _, kind := range []string{"task_started", "policy_decision", "a_kind_added_next_release"} {
+		if !seen[kind] {
+			t.Errorf("Recent dropped kind %q; got %v", kind, seen)
+		}
+	}
+	// Recent returns oldest-first like every other read here.
 	for i := 1; i < len(rows); i++ {
 		if rows[i-1].SequenceNumber > rows[i].SequenceNumber {
-			t.Errorf("not sorted at %d: %d > %d", i, rows[i-1].SequenceNumber, rows[i].SequenceNumber)
+			t.Fatalf("not oldest-first at %d: %d > %d", i, rows[i-1].SequenceNumber, rows[i].SequenceNumber)
 		}
+	}
+}
+
+// TestCoverage_Audit_Recent_RespectsLimit pins the bound: the
+// LIMIT must keep the NEWEST rows, not an arbitrary slice.
+func TestCoverage_Audit_Recent_RespectsLimit(t *testing.T) {
+	log := openTestAudit(t)
+	defer log.Close()
+	for i := 0; i < 10; i++ {
+		if _, err := log.Write(&audit.Row{
+			TaskID: "t-limit", Kind: "tool_call", Actor: "tester",
+			Payload: map[string]any{"i": i},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := log.Recent(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("len = %d, want 3", len(rows))
+	}
+	// The newest row is the 10th write.
+	if rows[len(rows)-1].Payload == nil {
+		t.Skip("payload not decoded in this build")
+	}
+	last := rows[len(rows)-1]
+	if last.SequenceNumber < 8 {
+		t.Errorf("limit kept the wrong rows; last seq = %d, want >= 8", last.SequenceNumber)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sadi/aios-system/internal/core/audit"
+	"github.com/sadi/aios-system/internal/core/schemas"
 	"github.com/sadi/aios-system/internal/policy"
 )
 
@@ -22,6 +23,32 @@ type Bus struct {
 	tools  map[string]Tool
 	policy *policy.Gateway
 	log    *audit.Log
+	// grants, when set, answers "has a human already approved
+	// THIS call?". The bus consults it before rejecting an
+	// `ask` decision.
+	//
+	// This was the missing half of the approval feature. The
+	// bus rejected every `ask` unconditionally, so a human
+	// answering "yes" changed nothing: the orchestrator
+	// retried the task, the bus returned the same `ask`, and
+	// the operator was asked about the identical call again.
+	// A gate you cannot open is not a gate, it is a wall --
+	// and the retry loop turned it into a double prompt that
+	// ended in a spurious denial.
+	grants ApprovalGrantChecker
+}
+
+// ApprovalGrantChecker reports whether an operator has
+// already approved the call described by the policy
+// decision.
+//
+// The decision (not the raw args) is passed because the
+// approval id in it is the canonical handle the approvals
+// service issued; the args do not carry it.
+type ApprovalGrantChecker interface {
+	// IsApproved reports whether the approval described by d
+	// has been granted for this specific call.
+	IsApproved(d *policy.Decision) bool
 }
 
 // Config wires the bus. Tools is the tool map; Policy and
@@ -32,6 +59,10 @@ type Config struct {
 	Tools  map[string]Tool
 	Policy *policy.Gateway
 	Audit  *audit.Log
+	// Grants is optional. When nil, an `ask` decision is
+	// rejected exactly as before, so existing callers and
+	// tests keep their current behaviour.
+	Grants ApprovalGrantChecker
 }
 
 // New returns a Bus. An empty cfg.Tools is allowed; every
@@ -42,6 +73,7 @@ func New(cfg Config) *Bus {
 		tools:  cfg.Tools,
 		policy: cfg.Policy,
 		log:    cfg.Audit,
+		grants: cfg.Grants,
 	}
 }
 
@@ -126,8 +158,39 @@ func (b *Bus) Dispatch(name string, args map[string]any, ctx Context) (Result, e
 			_ = b.writeAudit(tool, args, ctx, "deny", policyReason, "", 0)
 			return Result{OK: false, Summary: "denied: " + policyReason}, fmt.Errorf("tools: bus: %s denied by policy: %s", name, policyReason)
 		case decision.Action == policy.ActionAsk:
+			// An `ask` means "a human must decide". If
+			// one already has -- for this exact call --
+			// the gate is open and the call proceeds.
+			//
+			// Without this check the approval feature could
+			// not work end to end: the operator says yes,
+			// the task retries, and the bus returns the
+			// same `ask` for the same arguments. The
+			// operator is prompted twice for one action
+			// and the run then fails on a denial they
+			// never gave.
+			//
+			// The check is deliberately keyed to the
+			// decision's approval id, not to the tool
+			// name, so a grant for one command never
+			// authorises a different one.
+			if b.grants != nil && b.grants.IsApproved(decision) {
+				policyReason = decision.Reason + " (approved)"
+				break
+			}
 			_ = b.writeAudit(tool, args, ctx, "ask", policyReason, "", 0)
-			return Result{OK: false, Summary: "ask: " + policyReason}, fmt.Errorf("tools: bus: %s requires approval: %s", name, policyReason)
+			// The approval payload rides along on the
+			// error so the operator is shown what they
+			// are approving. It used to be discarded,
+			// which left the prompt with nothing to
+			// display but an id.
+			return Result{OK: false, Summary: "ask: " + policyReason},
+				&ApprovalRequiredError{
+					Tool:        name,
+					Reason:      policyReason,
+					ApprovalID:  approvalIDOf(decision),
+					Approval:    decision.Approval,
+				}
 		}
 	}
 
@@ -177,6 +240,37 @@ func (b *Bus) writeAudit(tool Tool, args map[string]any, ctx Context, decision, 
 	}
 	_, err := b.log.Write(row)
 	return err
+}
+
+// ApprovalRequiredError is returned when policy says `ask`
+// and no operator has approved the call yet.
+//
+// It is a typed error, not a formatted string, because the
+// caller needs the payload: the approval id and the
+// action/target an operator is being asked to authorize. The
+// old `fmt.Errorf("...requires approval: %s")` string forced
+// the worker to recover those details with
+// strings.Contains and then throw them away, which is how the
+// prompt ended up showing an operator nothing about the
+// command it wanted them to run.
+type ApprovalRequiredError struct {
+	Tool       string
+	Reason     string
+	ApprovalID string
+	Approval   *schemas.ApprovalPayload
+}
+
+func (e *ApprovalRequiredError) Error() string {
+	return fmt.Sprintf("tools: bus: %s requires approval: %s", e.Tool, e.Reason)
+}
+
+// approvalIDOf returns the canonical approval id from a
+// decision, or "" when the rule carried no approval.
+func approvalIDOf(d *policy.Decision) string {
+	if d == nil || d.Approval == nil {
+		return ""
+	}
+	return d.Approval.ApprovalID
 }
 
 // riskFromArgs returns the risk tier named in args (1 by

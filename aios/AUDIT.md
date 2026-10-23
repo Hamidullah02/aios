@@ -35,15 +35,46 @@ shipping state and the version that addressed it.
   not stubbed.
 
 * **C3. Approval service in the request path.**
-  Closed in v0.32.0. The BusWorker converts the
-  bus's "requires approval" error into a
-  `*runtime.WaitingForApproval` (see
-  `internal/cli/bus_worker.go`). The
-  orchestrator catches it via `errors.As` and
-  pauses the plan until the operator grants the
-  approval. The grant flow is the
-  `internal/approvals.Service.Request` /
-  `Grant` / `Deny` triad the audit named.
+   *Claimed closed in v0.32.0; actually closed in
+   v0.42.0.* The v0.32.0 claim was wrong, and the gap
+   between the claim and the code is the most
+   expensive item in this audit.
+
+   What shipped in v0.32.0 was the machinery *around*
+   the request path: `BusWorker` converted the bus's
+   `ask` error into a `*runtime.WaitingForApproval`,
+   the orchestrator caught it via `errors.As`, and
+   `approvals.Service` had `Request` / `Grant` / `Deny`.
+   But no code path connected those pieces to a
+   decision. `Deps.Approval` was never assigned, so
+   `runWithApprovals` always took its no-handler
+   branch. No CLI command spoke the daemon's protocol,
+   so `Grant` was unreachable from any terminal. And
+   the bus rejected every `ask` unconditionally, so a
+   human answering "yes" would have changed nothing
+   even if the answer had gone somewhere: the retry
+   re-asked for the identical call and the run ended
+   on a denial the operator never gave.
+
+   The user-visible symptom was a run that stopped on
+   any gated tool with `runtime: waiting for approval
+   ask:t1` and exit 2, and no command that could
+   resolve it. A system whose central safety mechanism
+   cannot be operated is not safe, it is just blocked;
+   the audit's instinct on this item was right and the
+   closure was premature.
+
+   v0.42.0 closes it for real: `ApprovalPrompt`
+   (terminal) and `DaemonApprovalHandler` (daemon
+   socket) with a documented precedence,
+   `tools.ApprovalGrantChecker` consulted by the bus
+   so an approved call proceeds on retry, grants keyed
+   on task/action/target rather than the per-decision
+   UUID, a typed `ApprovalRequiredError` carrying the
+   payload the operator needs to see, and
+   `aios approve` / `aios deny` for out-of-band
+   decisions. A grant covers one call in one run.
+   An unanswerable prompt denies; it never falls open.
 
 ### Partially closed
 
@@ -162,6 +193,20 @@ command that:
 4. Submits and runs.
 
 This is roughly one file. Should land in Phase 2 week 1.
+
+**Status: closed in v0.34.0, with a gap noted.**
+`aios fix <objective>` is the entry point this item asked
+for: it calls the planner, validates the plan, and runs it
+through the same loop `aios run` uses. It ships as `fix`
+rather than `submit-objective`, and it does not gate on
+`risk_tier >= 2` at plan level — plan-level risk gating is
+still not implemented. Per-tool-call gating is what the
+default policy actually uses (the `ask` rules), and that is
+the path v0.42.0 closed. A real model call is still
+required: without `OPENAI_API_KEY` (or an equivalent),
+`fix` stops with `planner: model call: openai: no_api_key`,
+which is the correct behaviour rather than a fallback to
+the fake adapter.
 
 ---
 

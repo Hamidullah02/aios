@@ -3,6 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,12 +59,71 @@ type Agent struct {
 	// The UI shows it so an operator can tell a fresh
 	// agent from one that has done work.
 	TaskCount int `json:"task_count"`
-	// StartedAt is when the current task began, zero when
-	// idle.
-	StartedAt time.Time `json:"started_at,omitzero"`
+	// StartedAt is when the current task began, absent when
+	// idle. It serialises as null rather than being omitted:
+	// the UI sorts on it, so the key must be present even when
+	// the value is not. encoding/json ignores omitempty on a
+	// struct field, so the tag would be a promise it cannot
+	// keep.
+	StartedAt Time `json:"started_at"`
 	// UpdatedAt is the last mutation time.
-	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	UpdatedAt Time `json:"updated_at"`
 }
+
+// Time is a JSON timestamp that can be absent.
+//
+// This exists instead of a time.Time with `json:",omitzero"`
+// because omitzero is a Go 1.24 encoding/json addition. On
+// the Go 1.23 toolchain this module targets, the option is
+// parsed as an unknown format verb and SILENTLY ignored, so
+// an idle agent's zero time was serialised as
+// "0001-01-01T00:00:00Z". The UI sorted its activity feed on
+// that string, so a placeholder timestamp sorted above real
+// activity instead of below it.
+//
+// A nil Time marshals to JSON null and a set Time to an
+// RFC 3339 string, which is the distinction the UI actually
+// needs: "never started" rather than "started at year one".
+type Time struct {
+	time.Time
+}
+
+// NewTime wraps a time, treating the zero time as absent.
+func NewTime(t time.Time) Time {
+	if t.IsZero() {
+		return Time{}
+	}
+	return Time{Time: t}
+}
+
+// MarshalJSON writes null for an absent timestamp.
+func (t Time) MarshalJSON() ([]byte, error) {
+	if t.IsZero() {
+		return []byte("null"), nil
+	}
+	return json.Marshal(t.Time)
+}
+
+// UnmarshalJSON reads either null or an RFC 3339 string.
+//
+// A client that sends a string, and a server that round-trips
+// one, both work; an absent field leaves the zero Time, which
+// re-marshals as null.
+func (t *Time) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		t.Time = time.Time{}
+		return nil
+	}
+	return t.Time.UnmarshalJSON(b)
+}
+
+// IsZero reports whether the timestamp is absent.
+func (t Time) IsZero() bool { return t.Time.IsZero() }
+
+// Or returns the wrapped time, or zero when absent. It keeps
+// callers that need the raw value from reaching through the
+// embedded field at every site.
+func (t Time) Or() time.Time { return t.Time }
 
 // Message is one entry in the agent-to-agent
 // communication panel.
@@ -81,7 +141,7 @@ type Message struct {
 	// Body is the human-readable text.
 	Body string `json:"body"`
 	// At is when the message was posted.
-	At time.Time `json:"at,omitzero"`
+	At Time `json:"at"`
 }
 
 // event is what the hub pushes to subscribers. It is an
@@ -121,6 +181,14 @@ type Hub struct {
 	// msgLimit caps the retained message history so a
 	// long-running process cannot grow without bound.
 	msgLimit int
+
+	// version counts mutations. See Snapshot.Version.
+	version int
+
+	// store persists the layout across process restarts. It is
+	// optional: a hub with no store keeps the layout in memory
+	// only, which is what a test or a throwaway server wants.
+	store *LayoutStore
 }
 
 // NewHub returns an empty hub with the default layout.
@@ -160,7 +228,8 @@ func (h *Hub) Upsert(id string, mutate func(*Agent)) *Agent {
 		h.agents[id] = a
 	}
 	mutate(a)
-	a.UpdatedAt = time.Now().UTC()
+	a.UpdatedAt = NewTime(time.Now().UTC())
+	h.version++
 	snapshot := *a
 	ev := mustEvent("agent", snapshot)
 	h.mu.Unlock()
@@ -184,7 +253,7 @@ func (h *Hub) Upsert(id string, mutate func(*Agent)) *Agent {
 func (h *Hub) SetStatus(id string, st Status, detail string) *Agent {
 	return h.Upsert(id, func(a *Agent) {
 		if a.Status != st && st == StatusRunning {
-			a.StartedAt = time.Now().UTC()
+			a.StartedAt = NewTime(time.Now().UTC())
 			a.TaskCount++
 		}
 		a.Status = st
@@ -244,12 +313,10 @@ func (h *Hub) Post(msg Message) (Message, bool) {
 	}
 	h.mu.Lock()
 	h.order++
-	msg.ID = itoa(h.order)
-	if msg.At.IsZero() {
-		msg.At = time.Now().UTC()
-	}
-	msg.At = msg.At.UTC()
+	msg.ID = strconv.Itoa(h.order)
+	msg.At = NewTime(msg.At.UTC())
 	h.msgs = append(h.msgs, msg)
+	h.version++
 	if len(h.msgs) > h.msgLimit {
 		// Drop from the front: the newest messages are the
 		// ones an operator is reading.
@@ -287,6 +354,14 @@ func (h *Hub) Layout() Layout {
 // SetLayout replaces the saved layout and notifies
 // subscribers so every open browser converges on the new
 // one.
+//
+// When the hub has a store, the layout is written through to
+// it. A persistence failure is returned, but the in-memory
+// layout is still updated: the operator's drag took effect in
+// the open tab, and reporting an error while silently
+// discarding it would be worse than the reverse. The in-memory
+// state is the source of truth for this process; the store is
+// how it survives the next one.
 func (h *Hub) SetLayout(l Layout) error {
 	if h == nil {
 		return nil
@@ -297,9 +372,48 @@ func (h *Hub) SetLayout(l Layout) error {
 	}
 	h.mu.Lock()
 	h.layout = norm
+	h.version++
 	ev := mustEvent("layout", norm)
+	store := h.store
 	h.mu.Unlock()
 	h.broadcast(ev)
+	if store == nil {
+		return nil
+	}
+	return store.Save(norm)
+}
+
+// SetStore attaches a layout store and loads whatever it has
+// saved into the hub.
+//
+// The load is reported separately from the attachment: a
+// corrupt layout file must not stop the server from starting,
+// so the hub keeps a usable default and the caller decides
+// whether to mention the failure.
+func (h *Hub) SetStore(s *LayoutStore) error {
+	if h == nil {
+		return nil
+	}
+	l, found, err := s.Load()
+	h.mu.Lock()
+	h.store = s
+	h.mu.Unlock()
+	if !found {
+		// Nothing saved yet. Leave the current layout alone:
+		// Attach may be called after a caller has already set
+		// one deliberately.
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	// Assign directly rather than through SetLayout, so loading
+	// the saved layout does not immediately rewrite the file
+	// that it just came from.
+	h.mu.Lock()
+	h.layout = l
+	h.version++
+	h.mu.Unlock()
 	return nil
 }
 
@@ -335,13 +449,21 @@ func (h *Hub) broadcast(ev event) {
 	if h == nil {
 		return
 	}
+	// Send while holding the read lock rather than snapshotting
+	// the channel list and releasing first.
+	//
+	// The previous version copied the channels, dropped the
+	// lock, and then sent. A subscriber whose cancel() ran in
+	// that window closed the channel between the two steps and
+	// the send panicked: "send on closed channel". Closing and
+	// sending are now both under h.mu, so they cannot interleave.
+	//
+	// The lock is not held across a blocking operation: every
+	// send is in a select with a default, so a subscriber that
+	// has stopped reading costs a dropped event and no wait.
 	h.mu.RLock()
-	targets := make([]chan event, 0, len(h.subs))
+	defer h.mu.RUnlock()
 	for _, ch := range h.subs {
-		targets = append(targets, ch)
-	}
-	h.mu.RUnlock()
-	for _, ch := range targets {
 		select {
 		case ch <- ev:
 		default:
@@ -358,7 +480,16 @@ type Snapshot struct {
 	Agents   []Agent   `json:"agents"`
 	Messages []Message `json:"messages"`
 	Layout   Layout    `json:"layout"`
-	Version  int       `json:"version"`
+	// Version increases by one on every mutation, so a client
+	// can tell "the snapshot I hold is current" from "the
+	// world moved on".
+	//
+	// It previously carried nextSub + len(msgs), which is not
+	// a version of anything: it went backwards when a browser
+	// disconnected, and moved on a message post without any
+	// agent changing. A client comparing it across snapshots
+	// would have seen spurious equality.
+	Version int `json:"version"`
 }
 
 // Snapshot returns the complete current state.
@@ -379,13 +510,13 @@ func (h *Hub) Snapshot() Snapshot {
 		Agents:   agents,
 		Messages: msgs,
 		Layout:   h.layout,
-		Version:  h.nextSub + len(h.msgs),
+		Version:  h.version,
 	}
 }
 
 // mustEvent marshals a payload that is known to be
 // JSON-safe (every payload type is a struct of scalars,
-// slices, and time.Time). A marshal failure would be a
+// slices, and Time). A marshal failure would be a
 // programming error, so it panics here rather than
 // propagating an error through every publish path.
 func mustEvent(kind string, payload any) event {
@@ -394,19 +525,4 @@ func mustEvent(kind string, payload any) event {
 		panic("webui: cannot marshal " + kind + " event: " + err.Error())
 	}
 	return event{Kind: kind, Payload: b}
-}
-
-// itoa avoids importing strconv for one call site.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

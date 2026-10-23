@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,102 @@ func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 		t.Fatalf("decode %q: %v", w.Body.String(), err)
 	}
 	return v
+}
+
+// TestSPAHandler_APIPathsNeverServeTheShell is the guard for
+// the bug where every unmatched /api/... request was answered
+// with index.html and a 200.
+//
+// That is the worst possible failure shape for an API: the
+// caller sees success, the content type says HTML, and a
+// client that only checks res.ok parses the shell as data.
+// Both cases below used to return 200 + HTML.
+func TestSPAHandler_APIPathsNeverServeTheShell(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	t.Run("wrong method on a real endpoint", func(t *testing.T) {
+		w := do(t, s, http.MethodPost, "/api/state", "")
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("POST /api/state = %d, want 405", w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); strings.HasPrefix(ct, "text/html") {
+			t.Errorf("content-type = %q, want JSON", ct)
+		}
+		if !strings.Contains(w.Body.String(), "error") {
+			t.Errorf("body = %q, want a JSON error", w.Body.String())
+		}
+		if allow := w.Header().Get("Allow"); allow != "GET" {
+			t.Errorf("Allow = %q, want \"GET\"", allow)
+		}
+	})
+
+	t.Run("unknown endpoint", func(t *testing.T) {
+		w := do(t, s, http.MethodGet, "/api/nope", "")
+		if w.Code != http.StatusNotFound {
+			t.Errorf("GET /api/nope = %d, want 404", w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); strings.HasPrefix(ct, "text/html") {
+			t.Errorf("content-type = %q, want JSON", ct)
+		}
+	})
+
+	t.Run("wrong method on the agent status route", func(t *testing.T) {
+		w := do(t, s, http.MethodGet, "/api/agents/builder/status", "")
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("GET agent status = %d, want 405", w.Code)
+		}
+	})
+
+	t.Run("layout wrong method", func(t *testing.T) {
+		w := do(t, s, http.MethodPost, "/api/layout", "{}")
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("POST /api/layout = %d, want 405", w.Code)
+		}
+	})
+}
+
+// TestSPAHandler_ClientRoutesStillGetTheShell is the other
+// half of the contract: tightening the API namespace must not
+// break deep links. A refresh on a client-side route still
+// has to load the app.
+func TestSPAHandler_ClientRoutesStillGetTheShell(t *testing.T) {
+	s, _ := newTestServer(t)
+	for _, p := range []string{"/", "/index.html", "/agents/builder", "/some/deep/route"} {
+		w := do(t, s, http.MethodGet, p, "")
+		if w.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", p, w.Code)
+			continue
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Errorf("GET %s content-type = %q, want HTML", p, ct)
+		}
+		if !strings.Contains(w.Body.String(), "<!DOCTYPE html>") {
+			t.Errorf("GET %s did not serve the shell", p)
+		}
+	}
+}
+
+// TestSPAHandler_StaticAssetsStillServe asserts the tightening
+// did not swallow real files: app.js and app.css must come
+// from disk, not from the HTML fallback.
+func TestSPAHandler_StaticAssetsStillServe(t *testing.T) {
+	s, _ := newTestServer(t)
+	for p, want := range map[string]string{
+		"/app.js":   "javascript",
+		"/app.css":  "css",
+	} {
+		w := do(t, s, http.MethodGet, p, "")
+		if w.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", p, w.Code)
+			continue
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, want) {
+			t.Errorf("GET %s content-type = %q, want %q", p, ct, want)
+		}
+		if strings.Contains(w.Body.String(), "<!DOCTYPE html>") {
+			t.Errorf("GET %s served the shell instead of the asset", p)
+		}
+	}
 }
 
 // --- construction ---
@@ -394,7 +491,7 @@ func TestHub_ConcurrentUse(t *testing.T) {
 		go func(w int) {
 			defer func() { done <- struct{}{} }()
 			for i := 0; i < 50; i++ {
-				id := "t" + itoa(w)
+				id := "t" + strconv.Itoa(w)
 				hub.SetStatus(id, StatusRunning, "x")
 				hub.Post(Message{From: id, Body: "hello"})
 				_ = hub.Agents()

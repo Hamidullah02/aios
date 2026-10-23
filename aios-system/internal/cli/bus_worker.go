@@ -41,7 +41,7 @@ func NewBusWorker(bus *tools.Bus, askTool *ask.AskUserTool, workspace string) *B
 
 // Run implements runtime.Worker. The task's `tool` field
 // is the bus dispatch name. The `inputs` are the args map.
-func (w *BusWorker) Run(input runtime.TaskInput, taskCtx *runtime.TaskContext, _ *runtime.BudgetMeter) (runtime.WorkerResult, error) {
+func (w *BusWorker) Run(input runtime.TaskInput, taskCtx *runtime.TaskContext, meter *runtime.BudgetMeter) (runtime.WorkerResult, error) {
 	if w.bus == nil {
 		return runtime.WorkerResult{}, errors.New("cli: bus worker: bus is nil")
 	}
@@ -95,15 +95,39 @@ func (w *BusWorker) Run(input runtime.TaskInput, taskCtx *runtime.TaskContext, _
 		TaskID:    input.ID,
 		Workspace: w.workspace,
 	})
+	// Record the call on the meter. Without this the
+	// meter never saw a tool call, so max_tool_calls and
+	// max_tool_calls_per_minute could never be reached and
+	// every report printed tool=0. The record happens for
+	// the dispatch attempt, not only for success: a denied
+	// or failed call is still work the operator paid for
+	// and must be visible in the accounting.
+	if meter != nil {
+		meter.RecordToolCall()
+	}
 	if err != nil {
-		// The bus returns this error for policy `ask`.
-		// The orchestrator catches *WaitingForApproval
-		// via errors.As, so the worker must surface
-		// the same type.
-		if strings.Contains(err.Error(), "requires approval") {
+		// The bus returns *tools.ApprovalRequiredError for
+		// policy `ask`. The orchestrator catches
+		// *runtime.WaitingForApproval via errors.As, so the
+		// worker converts one into the other.
+		//
+		// This used to sniff the error string for
+		// "requires approval" and then fabricate an id
+		// ("ask:"+taskID). That threw away the real
+		// approval id the policy gateway issued and the
+		// whole payload with it, so the operator was asked
+		// about an opaque string and no grant could ever be
+		// matched to the call it belonged to.
+		var need *tools.ApprovalRequiredError
+		if errors.As(err, &need) {
+			id := need.ApprovalID
+			if id == "" {
+				id = "ask:" + input.ID
+			}
 			return runtime.WorkerResult{}, &runtime.WaitingForApproval{
-				ApprovalID: "ask:" + input.ID,
+				ApprovalID: id,
 				Decision:   "ask",
+				Payload:    need.Approval,
 			}
 		}
 		return runtime.WorkerResult{Output: res.Summary}, err

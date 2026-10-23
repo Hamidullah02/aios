@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 
 	"github.com/sadi/aios-system/internal/approvals"
@@ -36,6 +37,23 @@ var bootstrapSubcommands = map[string]bool{
 	// messages; it can never start or stop a plan, so it
 	// grants no authority the policy would have denied.
 	CmdWeb: true,
+	// `tools` lists what the agent can dispatch. It builds
+	// the tool set directly rather than reading the policy
+	// or the audit log, so demanding either one bought
+	// nothing: on a workspace where `aios init` has not
+	// run yet, `aios tools` was the exact command a user
+	// would reach for to diagnose the failure, and it
+	// failed with "run `aios init` first" -- pointing at
+	// the very command that would have fixed it, from
+	// inside the diagnostic path.
+	CmdTools: true,
+	// approve / deny speak to a running daemon's socket and
+	// resolve what it is already holding. They need no local
+	// policy, and requiring one would be actively harmful: a
+	// broken policy is exactly when an operator most needs to
+	// inspect and clear what is pending.
+	CmdApprove: true,
+	CmdDeny:    true,
 }
 
 // requiresPolicy reports whether the subcommand needs a
@@ -66,6 +84,20 @@ type Deps struct {
 	Budget    runtime.Budget
 	Approval  ApprovalHandler
 	Approvals *approvals.Service
+	// Grants is the per-run approval store the bus consults.
+	// It is the reason an operator answering "yes" actually
+	// lets the call through: without it the bus re-asks on
+	// every retry.
+	Grants *grantStore
+	// stdin/stdout for the interactive approval prompt.
+	//
+	// Main fills these so the handler built in BuildDeps can
+	// actually ask a human. They are fields rather than
+	// parameters because BuildDeps predates the approval
+	// prompt and is called from Main and from tests.
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 	// Router, Prices, Egress: wired for the `fix`
 	// subcommand only. The router holds the model
 	// adapters (OpenAI, Anthropic); the price table
@@ -81,6 +113,42 @@ type Deps struct {
 	// the Router field is also exposed so tests can
 	// stub the model client.
 	Planner *planner.Planner
+}
+
+// newApprovalHandler picks the approval strategy for this
+// invocation.
+//
+// The default is the terminal prompt. That is a change in
+// behaviour, not just a new code path: previously no handler
+// existed at all and every gated call was an unresolvable
+// error. Making the prompt the default is the smallest
+// behaviour that lets a plan finish while still putting a
+// human in front of every gated action.
+func newApprovalHandler(args *Args, deps *Deps) ApprovalHandler {
+	if args.AssumeYes {
+		return &ApprovalPrompt{
+			In:        deps.Stdin,
+			Out:       deps.Stderr,
+			AssumeYes: true,
+		}
+	}
+	// An explicit --socket means the operator is driving
+	// approvals out-of-band (a second window, a separate
+	// operator tool), so defer to the daemon.
+	if args.SocketExplicit {
+		return &DaemonApprovalHandler{
+			SocketPath: args.SocketPath,
+			Out:        deps.Stderr,
+		}
+	}
+	// Otherwise ask at the terminal. If stdin cannot answer
+	// (EOF, a pipe, a CI job), the prompt reads that as a
+	// denial rather than hanging or auto-approving.
+	return &ApprovalPrompt{
+		In:      deps.Stdin,
+		Out:     deps.Stderr,
+		Timeout: approvalReadTimeout,
+	}
 }
 
 // Close releases the resources the Deps holds. The
@@ -242,9 +310,39 @@ func BuildDeps(args *Args) (*Deps, error) {
 	// wiring: they do not need a worker because they do
 	// not run plans.
 	if requiresPolicy(args.Command) {
+		// Per-run grant store. Created BEFORE the bus is wired
+		// because the bus holds a reference to it. One store
+		// per process is one store per run: grants never leak
+		// between plans.
+		deps.Grants = newGrantStore(deps.Approvals)
 		if err := wireAgentLoop(deps, args); err != nil {
 			_ = deps.Close()
 			return nil, err
+		}
+		// Approval handler.
+		//
+		// This was NEVER assigned before, so deps.Approval
+		// stayed nil for every subcommand. runWithApprovals
+		// checks `deps.Approve == nil` and returns the raw
+		// WaitingForApproval, so any plan hitting an `ask`
+		// policy rule stopped with "runtime: waiting for
+		// approval ask:t1" and exit 2. The grant/deny
+		// machinery existed (approvals.Service, the daemon's
+		// socket protocol) but no path reached it: the gate
+		// was a dead end.
+		//
+		// Precedence, most explicit first:
+		//   --yes            auto-approve (loudly)
+		//   --socket=<path>  drive the approval daemon
+		//   default          prompt the operator at the
+		//                     terminal
+		//
+		// The default is the interactive prompt because the
+		// overwhelmingly common case is one human at one
+		// terminal running one plan, and the point of an
+		// approval gate is that a human sees the request.
+		if args.Command == CmdRun || args.Command == CmdFix || args.Command == CmdResume {
+			deps.Approval = newApprovalHandler(args, deps)
 		}
 		// The `fix` subcommand also needs a planner
 		// (it turns the objective into a plan) and a
@@ -369,6 +467,10 @@ func wireAgentLoop(deps *Deps, args *Args) error {
 		Tools:  toolSet,
 		Policy: deps.Policy,
 		Audit:  deps.Audit,
+		// Consult the per-run grants so a call the operator
+		// already approved proceeds on the retry instead of
+		// raising the same `ask` again.
+		Grants: deps.Grants,
 	})
 	deps.Bus = bus
 	// Resolve the workspace root. The default is the

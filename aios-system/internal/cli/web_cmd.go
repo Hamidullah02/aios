@@ -25,6 +25,14 @@ import (
 func runWeb(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	hub := webui.NewHub()
 
+	// Load the operator's saved panel arrangement. A failure
+	// here costs a rearranged dashboard, so it is a note on
+	// stderr rather than a fatal error: the UI still serves
+	// with the default layout.
+	if err := hub.SetStore(webui.NewLayoutStore(webui.DefaultLayoutPath())); err != nil {
+		fmt.Fprintf(stderr, "note: could not load your saved layout, using the default: %v\n", err)
+	}
+
 	// Seed from the audit log so a freshly-started UI is not
 	// blank. Best effort: a UI with no history is still a
 	// working UI, so a read failure is a note on stderr

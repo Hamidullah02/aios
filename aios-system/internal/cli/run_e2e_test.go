@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,11 +180,26 @@ func TestRun_WaitingForApproval_NoHandler(t *testing.T) {
 		// No Approval handler.
 	})
 	if err == nil {
-		t.Fatal("expected WaitingForApproval error to surface")
+		t.Fatal("expected an error when no approval handler is wired")
 	}
-	var wfa *runtime.WaitingForApproval
-	if !errors.As(err, &wfa) {
-		t.Fatalf("expected *WaitingForApproval, got %T: %v", err, err)
+	// The error used to surface the raw
+	// *runtime.WaitingForApproval sentinel, which told an
+	// operator nothing: the message was "runtime: waiting for
+	// approval ask:t1" and there was no command that could
+	// resolve it. It is now a CliError naming the approval
+	// and the ways to resolve it.
+	var cliErr *CliError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected *CliError, got %T: %v", err, err)
+	}
+	if cliErr.Kind != "approval" {
+		t.Errorf("Kind = %q, want \"approval\"", cliErr.Kind)
+	}
+	if !strings.Contains(cliErr.What, "apr-1") {
+		t.Errorf("error should name the approval id; got %q", cliErr.What)
+	}
+	if !strings.Contains(cliErr.What, "--yes") {
+		t.Errorf("error should say how to proceed; got %q", cliErr.What)
 	}
 }
 

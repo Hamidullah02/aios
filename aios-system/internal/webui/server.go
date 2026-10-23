@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"strconv"
+	"strings"
 	"time"
 )
 
@@ -122,6 +122,15 @@ func (s *Server) ListenAndServe() error {
 
 // spaHandler serves the embedded assets, falling back to
 // index.html so client-side routes work on a refresh.
+//
+// The fallback is scoped to non-API paths only. A request to
+// /api/anything that matches no handler used to be served the
+// HTML shell with a 200, so a mistyped API call looked like a
+// successful response with the wrong body: `POST /api/state`
+// returned 200 and the app.js, and a fetch() that treated
+// non-2xx as failure would happily parse HTML as state. An
+// API namespace that answers 200 with HTML is worse than one
+// that answers 404, because it fails late and silently.
 func spaHandler(sub fs.FS, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Never serve the directory listing for a bare
@@ -139,6 +148,24 @@ func spaHandler(sub fs.FS, next http.Handler) http.Handler {
 			serveIndex(sub, w, r)
 			return
 		}
+		// An unmatched /api/... path is an API error, not a
+		// client-side route. Distinguish "no such endpoint"
+		// (404) from "right endpoint, wrong method" (405):
+		// the mux knows the path is registered for another
+		// method, and silently serving the shell for it
+		// turned POST /api/state into a 200 carrying HTML,
+		// which a fetch() that only checks res.ok would
+		// accept as a successful state read.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if knownAPI.Has(r.URL.Path) {
+				w.Header().Set("Allow", knownAPI.methodsFor(r.URL.Path))
+				writeError(w, http.StatusMethodNotAllowed,
+					r.Method+" is not allowed on "+r.URL.Path)
+				return
+			}
+			writeError(w, http.StatusNotFound, "no such endpoint: "+r.URL.Path)
+			return
+		}
 		f, err := sub.Open(path(r.URL.Path))
 		if err != nil {
 			// Unknown path: assume a client route and
@@ -149,6 +176,46 @@ func spaHandler(sub fs.FS, next http.Handler) http.Handler {
 		f.Close()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// knownAPI records the API routes and the methods each one
+// answers, so the SPA fallback can tell "wrong method" from
+// "no such endpoint" and answer 405 instead of serving the
+// HTML shell.
+var knownAPI = apiRoutes{
+	"/api/state":              {"GET"},
+	"/api/events":             {"GET"},
+	"/api/messages":           {"POST"},
+	"/api/layout":             {"GET", "PUT"},
+	"/api/agents/{id}/status": {"POST"},
+}
+
+type apiRoutes map[string][]string
+
+// Has reports whether the exact path is a registered route.
+//
+// The agent-status route is matched literally here even
+// though it carries a wildcard: a wrong method on
+// /api/agents/builder/status still needs 405, and treating
+// it as unknown would answer 404. The cost is that a request
+// to a made-up agent under the real prefix gets 405 rather
+// than 404 on a method mismatch; the status handler itself
+// still 404s an unknown agent id.
+func (a apiRoutes) Has(p string) bool {
+	if _, ok := a[p]; ok {
+		return true
+	}
+	const prefix = "/api/agents/"
+	const suffix = "/status"
+	return strings.HasPrefix(p, prefix) && strings.HasSuffix(p, suffix)
+}
+
+// methodsFor returns the Allow header value for a path.
+func (a apiRoutes) methodsFor(p string) string {
+	if m, ok := a[p]; ok {
+		return strings.Join(m, ", ")
+	}
+	return "POST"
 }
 
 func serveIndex(sub fs.FS, w http.ResponseWriter, r *http.Request) {
@@ -347,7 +414,3 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
-
-// itoaStr is a small helper for the CSP header, kept here
-// so the import list stays minimal.
-func itoaStr(n int) string { return strconv.Itoa(n) }

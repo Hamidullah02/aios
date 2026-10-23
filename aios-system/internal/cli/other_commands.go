@@ -19,7 +19,20 @@ type ResumeDeps struct {
 	Worker  runtime.Worker
 	Verify  runtime.Verifier
 	Budget  runtime.Budget
-	Approve ApprovalHandler
+	// GrantStore records the approvals granted during this
+	// run. The bus consults it so a retried task whose call
+	// the operator already approved proceeds instead of
+	// re-raising the same `ask`.
+	//
+	// nil is safe: the run then behaves as before, re-asking
+	// on every attempt.
+	GrantStore *grantStore
+	Approve    ApprovalHandler
+	// Observer is optional. v0.41.1: when set, it receives
+	// task lifecycle events. This is how `aios run --web`
+	// feeds the live UI without the runtime knowing the UI
+	// exists: the runtime publishes, this command bridges.
+	Observer runtime.Observer
 }
 
 // Resume restarts a paused plan from the last checkpoint.
@@ -56,12 +69,26 @@ func Resume(ctx context.Context, args *Args, deps ResumeDeps) (*runtime.Report, 
 // CancelDeps is the wiring the cancel subcommand needs.
 type CancelDeps struct {
 	Resume *runtime.ResumeHandler
+	// Out receives the one-line summary of what cancel did.
+	// Optional; nil discards it.
+	Out io.Writer
 }
 
-// Cancel stops a running task. Per REQ-CLI-CXL-001. The
-// runtime does not expose a public Cancel hook on a
-// specific plan today; the CLI deletes the persisted
-// checkpoint so the next `run` starts over.
+// Cancel cancels a task per REQ-CLI-CXL-001.
+//
+// What it actually does today: deletes the persisted
+// checkpoint, so the next `run` of that plan starts over
+// rather than resuming. There is no signal path from this
+// process to a running orchestrator in another one, so it
+// cannot stop a run that is in flight right now; the help
+// text used to claim it could.
+//
+// The function returns a *CliError{Kind: "user"} when there
+// was no checkpoint to delete. Cancelling something that is
+// not cancelled is a user error, and reporting it as success
+// is how an operator ends up believing a runaway plan has
+// stopped. It used to return nil here, so `aios cancel
+// <anything>` always exited 0.
 func Cancel(taskID string, deps CancelDeps) error {
 	if taskID == "" {
 		return &CliError{Kind: "user", What: "task id is required"}
@@ -69,8 +96,26 @@ func Cancel(taskID string, deps CancelDeps) error {
 	if deps.Resume == nil {
 		return &CliError{Kind: "config", What: "resume handler is not configured"}
 	}
+	// Check for the checkpoint BEFORE deleting it. Delete is
+	// deliberately idempotent and swallows "not exist", so
+	// deleting first would make "there was nothing to
+	// cancel" indistinguishable from "cancelled
+	// successfully" -- which is how `aios cancel
+	// <anything>` came to always report success.
+	if _, err := deps.Resume.Load(taskID); err != nil {
+		if errors.Is(err, runtime.ErrCheckpointNotFound) {
+			return &CliError{
+				Kind: "user",
+				What: fmt.Sprintf("nothing to cancel for %q: no checkpoint (a run in progress is not interrupted by cancel; stop the `aios run` process instead)", taskID),
+			}
+		}
+		return &CliError{Kind: "config", What: "load checkpoint", Cause: err}
+	}
 	if err := deps.Resume.Delete(taskID); err != nil {
 		return &CliError{Kind: "config", What: "delete checkpoint", Cause: err}
+	}
+	if deps.Out != nil {
+		fmt.Fprintf(deps.Out, "cancelled %s: checkpoint deleted\n", taskID)
 	}
 	return nil
 }
@@ -140,18 +185,23 @@ type AuditDeps struct {
 	Tail  bool
 }
 
-// Audit prints the audit log. Per REQ-CLI-AUD-001 the
-// `--tail` flag follows new rows. Tail is a no-op in this
-// revision (the audit log does not yet expose a blocking
-// read); it is wired so the CLI contract matches the doc
-// set.
+// Audit prints the audit log.
 //
-// When taskID is empty, the function pulls the last 1000
-// rows of the well-known kinds and unions them. The audit
-// log's primary index is task-scoped; a "show me every
-// row" query would require a new method on the audit log
-// (REQ-CLI-OPEN-001 in the open-questions list). For now
-// the iteration is bounded and deterministic.
+// With a taskID it shows that task's rows. Without one it
+// shows the tail of the whole log.
+//
+// The no-taskID path used to union a hardcoded list of "well
+// known" kinds, which had drifted: `policy_decision` (written
+// on every tool call), the plan-level state rows, and
+// `task_cancelled` were all missing from it, so the default
+// `aios audit` view silently omitted most of what the system
+// recorded while `aios audit <task>` showed everything. It
+// now calls Log.Recent, which cannot go stale.
+//
+// --tail is still not implemented (the audit log has no
+// blocking read). Rather than exit 0 having printed nothing,
+// which reads as "no activity", it says so and points at the
+// supported alternative.
 func Audit(taskID string, deps AuditDeps) error {
 	if deps.Audit == nil {
 		return &CliError{Kind: "config", What: "audit log is not configured"}
@@ -160,12 +210,8 @@ func Audit(taskID string, deps AuditDeps) error {
 		return &CliError{Kind: "config", What: "audit: out is nil"}
 	}
 	if deps.Tail {
-		// Tail is a no-op in this revision (the audit
-		// log does not yet expose a blocking read);
-		// the contract is wired for the follow-up
-		// implementation. Without a tail loop the
-		// function returns success immediately.
-		return nil
+		fmt.Fprintln(deps.Out,
+			"--tail is not implemented yet; showing the last rows instead")
 	}
 	var rows []audit.PersistedRow
 	if taskID != "" {
@@ -175,36 +221,11 @@ func Audit(taskID string, deps AuditDeps) error {
 		}
 		rows = r
 	} else {
-		seen := make(map[int64]bool)
-		// Union across the well-known kinds. Each call
-		// to GetByKind returns up to 1000 rows; the union
-		// is sorted in SQL order.
-		kinds := []string{
-			"tool_call", "approval_requested", "approval_granted",
-			"approval_denied", "approval_expired", "task_started",
-			"task_passed", "task_failed", "plan_dispatched",
-			// memory_write (v0.39.0): the row the
-			// memory tools write above and beyond the
-			// bus's tool_call row, so an operator can
-			// see what was persisted vs just what was
-			// dispatched.
-			"memory_write",
+		r, err := deps.Audit.Recent(auditTailLimit)
+		if err != nil {
+			return &CliError{Kind: "audit", What: "read", Cause: err}
 		}
-		for _, k := range kinds {
-			r, err := deps.Audit.GetByKind(k, 1000)
-			if err != nil {
-				return &CliError{Kind: "audit", What: "read kind " + k, Cause: err}
-			}
-			for _, row := range r {
-				if !seen[row.SequenceNumber] {
-					seen[row.SequenceNumber] = true
-					rows = append(rows, row)
-				}
-			}
-		}
-		// Sort by sequence number (insertion order from
-		// the kinds is not guaranteed across calls).
-		sortBySequence(rows)
+		rows = r
 	}
 	for _, r := range rows {
 		fmt.Fprintf(deps.Out, "%d\t%s\t%s\t%s\n", r.SequenceNumber, r.TaskID, r.Kind, r.ContentHash)
@@ -224,20 +245,14 @@ func Audit(taskID string, deps AuditDeps) error {
 			fmt.Fprintln(deps.Out, "no rows in the audit log")
 		}
 	}
-	_ = deps.Tail // tail is a no-op today
 	return nil
 }
 
-// sortBySequence is a small helper that sorts persisted rows
-// by sequence number ascending. We avoid sort.Slice here to
-// keep the function tiny and obvious.
-func sortBySequence(rows []audit.PersistedRow) {
-	for i := 1; i < len(rows); i++ {
-		for j := i; j > 0 && rows[j-1].SequenceNumber > rows[j].SequenceNumber; j-- {
-			rows[j-1], rows[j] = rows[j], rows[j-1]
-		}
-	}
-}
+// auditTailLimit is how many rows a bare `aios audit` shows.
+//
+// It is a bound so a long-lived log cannot flood a terminal;
+// it is not a filter. Rows are never dropped by kind.
+const auditTailLimit = 1000
 
 // runWithApprovals is the inner loop shared by Run and
 // Resume. It builds the orchestrator, runs it, and on
@@ -255,7 +270,7 @@ func runWithApprovals(
 	if plan == nil {
 		return nil, errors.New("plan is nil")
 	}
-	meter := runtime.NewBudgetMeter(deps.Budget)
+	meter := runtime.NewBudgetMeter(planBudget(plan, deps.Budget))
 	o := runtime.New(runtime.Config{
 		Worker:   deps.Worker,
 		Verifier: deps.Verify,
@@ -263,6 +278,11 @@ func runWithApprovals(
 		Audit:    deps.Audit,
 		Resume:   deps.Resume,
 	})
+	// v0.41.1: register the observer on the ONE orchestrator
+	// instance, before the approval loop. Registering per
+	// iteration would replay the task_started row for a task
+	// that resumed into, double-counting it in the UI.
+	o.AddObserver(deps.Observer)
 	for i := 0; i < 100; i++ {
 		report, err := o.Run(ctx, plan, cp)
 		if err == nil {
@@ -273,7 +293,15 @@ func runWithApprovals(
 			return report, err
 		}
 		if deps.Approve == nil {
-			return report, wfa
+			// No handler: the run cannot ask anyone. This is
+			// a wiring bug in the caller, not a user error,
+			// so say what to do rather than leaking the raw
+			// "waiting for approval" sentinel that told an
+			// operator nothing about how to proceed.
+			return report, &CliError{
+				Kind: "approval",
+				What: fmt.Sprintf("task %s needs approval but no approval handler is configured (this is a bug; run through `aios run`, or pass --yes / --socket)", taskIDOf(wfa)),
+			}
 		}
 		ok, appErr := deps.Approve.Approve(ctx, wfa)
 		if appErr != nil {
@@ -282,6 +310,13 @@ func runWithApprovals(
 		if !ok {
 			return report, &CliError{Kind: "approval", What: caller + ": operator denied the action"}
 		}
+		// Record the grant BEFORE the retry, so the retried
+		// task's identical tool call is recognised as
+		// already approved by the bus instead of prompting
+		// the operator a second time for one action.
+		if deps.GrantStore != nil {
+			deps.GrantStore.Grant(wfa)
+		}
 		next, cpErr := deps.Resume.Load(plan.ID)
 		if cpErr != nil {
 			return report, &CliError{Kind: "resume", What: "load checkpoint", Cause: cpErr}
@@ -289,4 +324,45 @@ func runWithApprovals(
 		cp = next
 	}
 	return nil, &CliError{Kind: "approval", What: "too many approval loops (>100)"}
+}
+
+// planBudget merges the plan's declared budget into the
+// caller's budget envelope.
+//
+// A TaskPlan carries a schemas.Budget with cost_usd and
+// wall_clock_sec, but nothing ever mapped it onto the
+// runtime.Budget the meter enforces, so every run enforced
+// nothing and the report printed cost=0.0000 tool=0 model=0
+// net=0 no matter how much work happened. A budget the
+// operator wrote into their plan was documentation, not a
+// limit.
+//
+// Precedence: an explicit caller-supplied cap wins. The
+// caller (BuildDeps, or a test) may have set a tighter
+// operational limit, and a plan file must not be able to
+// loosen a limit the operator configured out of band.
+func planBudget(plan *schemas.TaskPlan, caller runtime.Budget) runtime.Budget {
+	out := caller
+	if plan == nil || plan.Budget == nil {
+		return out
+	}
+	if out.MaxCostUSD == 0 && plan.Budget.CostUSD > 0 {
+		out.MaxCostUSD = plan.Budget.CostUSD
+	}
+	if out.MaxWallTimeSec == 0 && plan.Budget.WallClockSec > 0 {
+		out.MaxWallTimeSec = plan.Budget.WallClockSec
+	}
+	return out
+}
+// taskIDOf extracts a task identifier from an approval
+// request for use in an error message.
+//
+// The runtime request carries the approval id, not the task
+// id, and the two differ ("ask:t1" vs "t1"). Returning the
+// request's id is enough to let an operator find the task.
+func taskIDOf(wfa *runtime.WaitingForApproval) string {
+	if wfa == nil || wfa.ApprovalID == "" {
+		return "unknown"
+	}
+	return wfa.ApprovalID
 }

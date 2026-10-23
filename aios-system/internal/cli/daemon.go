@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -16,6 +17,28 @@ import (
 	"github.com/sadi/aios-system/internal/core/audit"
 	"github.com/sadi/aios-system/internal/core/schemas"
 )
+
+// DefaultSocketPath is the approval socket's default location.
+//
+// On Windows a rooted "/tmp/..." path is not a valid
+// filesystem location, so the default has to come from the
+// temp directory or `daemon start` fails with a confusing
+// "The system cannot find the path specified". The socket
+// name is unchanged so an operator reading a Unix
+// transcript recognises it.
+func DefaultSocketPath() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.TempDir(), "aios-approval.sock")
+	}
+	return "/tmp/aios-approval.sock"
+}
+
+// pidWatchInterval is how often the daemon checks whether its
+// own pid file still exists. It is the poll period for the
+// `daemon stop` handshake, so it sets the worst-case latency
+// of a stop. A second is coarse enough to be invisible and
+// fine enough that a stop feels immediate.
+const pidWatchInterval = time.Second
 
 // Daemon is the approval daemon. Per REQ-CLI-DAE-001 the
 // daemon listens on a Unix socket. Per REQ-CLI-DAE-003 the
@@ -51,7 +74,7 @@ type DaemonConfig struct {
 // touching the filesystem.
 func NewDaemon(cfg DaemonConfig) *Daemon {
 	if cfg.SocketPath == "" {
-		cfg.SocketPath = "/tmp/aios-approval.sock"
+		cfg.SocketPath = DefaultSocketPath()
 	}
 	if cfg.PidPath == "" {
 		cfg.PidPath = "./var/aios-daemon.pid"
@@ -76,8 +99,26 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}
 	// Remove any stale socket file from a previous run.
 	_ = os.Remove(d.socketPath)
+	// Write the pid file.
+	//
+	// This runs BEFORE the bind, so that by the time the socket
+	// exists the pid file does too. A caller (or a test) that
+	// treats "socket is present" as "daemon is up" and then
+	// reads the pid file was racing the other order: Listen
+	// makes the socket visible immediately, while the pid
+	// write that followed it could land microseconds later.
+	// Writing the pid first removes that window entirely.
+	if d.pidPath != "" {
+		if err := os.WriteFile(d.pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+			return &CliError{Kind: "daemon", What: "write pid file", Cause: err}
+		}
+	}
 	ln, err := net.Listen("unix", d.socketPath)
 	if err != nil {
+		// The pid file was written for a daemon that will not
+		// start, so remove it rather than leave a stale pid
+		// pointing at a process that is not listening.
+		_ = os.Remove(d.pidPath)
 		return &CliError{Kind: "daemon", What: "listen on " + d.socketPath, Cause: err}
 	}
 	d.mu.Lock()
@@ -85,12 +126,17 @@ func (d *Daemon) Start(ctx context.Context) error {
 	d.stopped = false
 	d.mu.Unlock()
 
-	// Write the pid file.
+	// Watch the pid file so `aios daemon stop` actually stops
+	// the daemon. Accept() blocks, so the check cannot live in
+	// the accept loop; it runs on its own goroutine and closes
+	// the listener, which is the same shutdown path Stop()
+	// uses.
 	if d.pidPath != "" {
-		if err := os.WriteFile(d.pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
-			return &CliError{Kind: "daemon", What: "write pid file", Cause: err}
-		}
+		watchDone := make(chan struct{})
+		defer close(watchDone)
+		go d.watchPidFile(watchDone)
 	}
+
 	// Clean up the pid file and socket on exit.
 	defer func() {
 		_ = os.Remove(d.pidPath)
@@ -131,6 +177,40 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}
 }
 
+// watchPidFile polls for the disappearance of the daemon's own
+// pid file and stops the daemon when it happens.
+//
+// `RunDaemonStop` deletes the pid file, and before this
+// watcher existed nothing on the daemon side reacted: the
+// operator ran `daemon stop`, got exit 0, and the daemon kept
+// serving. Deleting the file IS the stop protocol, so this is
+// where that protocol is honoured.
+//
+// The watcher exits when done closes (Start returned) so a
+// stopped daemon does not leak a goroutine, and it treats a
+// stat error other than "not exist" as "still running" so a
+// transient permission error cannot kill a healthy daemon.
+func (d *Daemon) watchPidFile(done <-chan struct{}) {
+	t := time.NewTicker(pidWatchInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+			_, err := os.Stat(d.pidPath)
+			if err == nil {
+				continue // still there
+			}
+			if !os.IsNotExist(err) {
+				continue // unreadable, but not gone
+			}
+			// The pid file is gone: `daemon stop` ran.
+			_ = d.Stop()
+			return
+		}
+	}
+}
 // Stop closes the listener. Idempotent.
 func (d *Daemon) Stop() error {
 	d.mu.Lock()

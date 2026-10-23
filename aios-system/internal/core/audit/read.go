@@ -81,6 +81,54 @@ LIMIT ?
 	defer rows.Close()
 	return scanRows(rows)
 }
+// Recent returns the most recent rows across ALL kinds, oldest
+// first, bounded by limit.
+//
+// This exists because the audit log's only "list everything"
+// access path used to be a hand-maintained union of known
+// kinds (GetByKind called once per kind and merged in Go).
+// That list could not stay complete: `policy_decision`, which
+// the policy gateway writes on every single tool call, was
+// never added to it, so `aios audit` silently omitted every
+// policy decision the system made while `aios audit <task>`
+// showed them. An audit view that silently drops rows is worse
+// than no audit view, because it reads as authoritative.
+//
+// A single ORDER BY sequence_number DESC with a LIMIT cannot
+// go stale as new kinds are added, and the primary key makes
+// the sort cheap.
+func (l *Log) Recent(limit int) ([]PersistedRow, error) {
+	if l.db == nil {
+		return nil, errors.New("audit.Log: closed")
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := l.db.Query(`
+SELECT sequence_number, row_id, task_id, step_id, kind, actor, risk_tier,
+       approval_id, idempotency_key, payload, redacted_hash, content_hash,
+       chain_hash, ts_ns
+FROM audit_rows
+ORDER BY sequence_number DESC
+LIMIT ?
+`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("audit.Recent: query: %w", err)
+	}
+	defer rows.Close()
+	out, err := scanRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	// The query walks backwards (newest first) so the LIMIT
+	// keeps the newest N. The contract everywhere else in this
+	// package is oldest-first, so reverse before returning:
+	// an audit reader wants to read a run forwards.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
 
 // GetByKindPayloadField returns rows of a given kind whose
 // payload has a top-level string field equal to value. The

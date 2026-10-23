@@ -46,9 +46,9 @@ func (b *Bridge) TaskStarted(e runtime.TaskEvent) {
 	b.hub.Upsert(e.TaskID, func(a *Agent) {
 		if a.Status != StatusRunning {
 			if e.At.IsZero() {
-				a.StartedAt = time.Now().UTC()
+				a.StartedAt = NewTime(time.Now().UTC())
 			} else {
-				a.StartedAt = e.At
+				a.StartedAt = NewTime(e.At)
 			}
 			a.TaskCount++
 		}

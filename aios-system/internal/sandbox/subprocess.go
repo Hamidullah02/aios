@@ -55,11 +55,10 @@ func NewSubprocessRunnerWithClock(now func() time.Time) *SubprocessRunner {
 	}
 	return &SubprocessRunner{now: now}
 }
-
 // formatEnv converts an Env map into the []string form
 // os/exec.Cmd.Env expects. The order is non-deterministic
-// (Go map iteration); RunOptions.InheritEnv callers should
-// not rely on a specific ordering.
+// (Go map iteration); InheritEnv callers should not rely on
+// a specific ordering.
 func formatEnv(m map[string]string) []string {
 	if len(m) == 0 {
 		return nil
@@ -70,6 +69,7 @@ func formatEnv(m map[string]string) []string {
 	}
 	return out
 }
+
 
 // RunOptions is the input to SubprocessRunner.Run.
 //
@@ -228,9 +228,7 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 	}
 	// REQ-SND-ISO-002: clear the environment; set only the
 	// allowed variables. A nil Env means an empty
-	// environment. When InheritEnv is set, the parent's
-	// environment is the starting point and Env is
-	// overlaid on top.
+	// environment.
 	var env []string
 	if opts.InheritEnv {
 		env = os.Environ()

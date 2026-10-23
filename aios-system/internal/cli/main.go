@@ -7,6 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
+
+	"github.com/sadi/aios-system/internal/webui"
 )
 
 // Main is the entry point the production binary calls. The
@@ -50,6 +54,22 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, DisplayError(err, args.Debug))
 		return ExitCodeFor(err)
 	}
+	// Hand the terminal to the approval handler. BuildDeps
+	// runs before the subcommand dispatcher, so this is the
+	// first point at which a handler can exist; without it
+	// the interactive approval prompt has no stream to read
+	// from and every gated call dead-ends.
+	//
+	// stdin is os.Stdin rather than a parameter because Main
+	// is the only place that knows about the real process.
+	if deps.Stdin == nil {
+		deps.Stdin = os.Stdin
+	}
+	deps.Stdout = stdout
+	deps.Stderr = stderr
+	if args.Command == CmdRun || args.Command == CmdFix || args.Command == CmdResume {
+		deps.Approval = newApprovalHandler(args, deps)
+	}
 	defer func() {
 		if err := deps.Close(); err != nil {
 			fmt.Fprintf(stderr, "cli: close deps: %v\n", err)
@@ -77,7 +97,7 @@ func RunCommand(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	case CmdResume:
 		return runResume(ctx, args, deps, stdout, stderr)
 	case CmdCancel:
-		return runCancel(args, deps, stderr)
+		return runCancel(args, deps, stdout, stderr)
 	case CmdReport:
 		return runReport(args, deps, stdout, stderr)
 	case CmdAudit:
@@ -88,10 +108,88 @@ func RunCommand(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 		return runTools(args, deps, stdout, stderr)
 	case CmdWeb:
 		return runWeb(args, deps, stdout, stderr)
+	case CmdApprove:
+		return runApprovalDecision(args, true, stdout, stderr)
+	case CmdDeny:
+		return runApprovalDecision(args, false, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "cli: unknown subcommand %q\n", args.Command)
 		return ExitUserError
 	}
+}
+
+// runApprovalDecision implements `aios approve <id>` and
+// `aios deny <id>`.
+//
+// The approval gate only ever had one resolution path: the
+// run's own process asking its terminal. That works for one
+// person at one machine. It does not work for the cases that
+// matter in practice: a run on a background host, a second
+// administrator who is not sitting at that terminal, or a
+// reviewer who wants to decide from somewhere else. Both
+// commands talk the daemon's own socket protocol, so the
+// daemon stays the single source of truth for what is
+// pending.
+func runApprovalDecision(args *Args, approve bool, stdout, stderr io.Writer) int {
+	verb := "approve"
+	if !approve {
+		verb = "deny"
+	}
+	if len(args.Positional) == 0 {
+		fmt.Fprintf(stderr, "error: user: `aios %s` requires an approval id: aios %s <approval-id>\n", verb, verb)
+		return ExitUserError
+	}
+	id := strings.TrimSpace(args.Positional[0])
+	if id == "" {
+		fmt.Fprintf(stderr, "error: user: approval id is empty\n")
+		return ExitUserError
+	}
+
+	c, err := dialDaemon(args.SocketPath, 5*time.Second)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s", DisplayError(err, args.Debug))
+		return ExitSystemError
+	}
+	defer c.Close()
+
+	// The wire verb is NOT the CLI verb. The daemon's
+	// protocol (REQ-CLI-DAE-003) names the message "grant";
+	// the user-facing command is `approve`. Sending "approve"
+	// gets `unknown kind: approve` back, which is what the
+	// first version of this did.
+	wire := verb
+	if approve {
+		wire = "grant"
+	}
+	req := map[string]any{
+		"kind":  wire,
+		"id":    id,
+		"actor": "operator",
+	}
+	if approve {
+		// The daemon checks the binding on grant, so the
+		// context has to match the call-site. The task,
+		// tool, and actor are unknown to this process, so
+		// they are sent empty and the daemon treats an empty
+		// field as "do not check": the operator already
+		// named the exact approval id, which is the
+		// capability.
+		req["ctx"] = map[string]any{"actor": "operator"}
+	}
+	resp, err := c.send(req)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s", DisplayError(err, args.Debug))
+		return ExitSystemError
+	}
+	state, _ := resp["state"].(string)
+	if state == "" {
+		state = "granted"
+		if !approve {
+			state = "denied"
+		}
+	}
+	fmt.Fprintf(stdout, "approval %s: %s\n", id, state)
+	return ExitOK
 }
 
 func runInit(args *Args, deps *Deps, stdout, stderr io.Writer) int {
@@ -114,6 +212,47 @@ func runInit(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 }
 
 func runRun(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Writer) int {
+	// v0.41.1: --web serves the UI from this process so the
+	// panels update live while the plan runs.
+	//
+	// Without it, an operator who opens `aios web` in another
+	// shell sees only the audit log's history, because the two
+	// commands are separate processes and only this one holds
+	// the orchestrator.
+	var live *webui.Hub
+	if args.WebLive {
+		live = webui.NewHub()
+		// Load the operator's saved panel arrangement so
+		// --web looks like the UI they already arranged.
+		if err := live.SetStore(webui.NewLayoutStore(webui.DefaultLayoutPath())); err != nil {
+			fmt.Fprintf(stderr, "note: could not load your saved layout, using the default: %v\n", err)
+		}
+		srv, err := webui.New(webui.Config{Hub: live, Addr: args.WebAddr})
+		if err != nil {
+			fmt.Fprint(stderr, DisplayError(&CliError{Kind: "config", What: "run --web: " + err.Error()}, args.Debug))
+			return ExitSystemError
+		}
+		url := "http://" + srv.Addr() + "/"
+		fmt.Fprintf(stdout, "aios: serving the operator UI at %s\n", url)
+		// The server runs on its own goroutine and is never
+		// shut down: the process exits when the plan finishes,
+		// and a graceful-shutdown handshake for a process that
+		// is about to exit would be code with no caller.
+		go func() {
+			if sErr := srv.ListenAndServe(); sErr != nil {
+				// Not fatal: the plan is still running and the
+				// operator has the terminal report. Surface it
+				// and carry on.
+				fmt.Fprintf(stderr, "aios: web server stopped: %v\n", sErr)
+			}
+		}()
+		// Give the listener a moment so the URL printed above
+		// is reachable by the time an operator clicks it. This
+		// is a courtesy delay, not a correctness barrier: the
+		// UI's SSE client reconnects with backoff regardless.
+		time.Sleep(150 * time.Millisecond)
+	}
+
 	report, err := Run(ctx, args, RunDeps{
 		Audit:        deps.Audit,
 		Policy:       deps.Policy,
@@ -122,7 +261,9 @@ func runRun(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Write
 		Verifier:     deps.Verifier,
 		Budget:       deps.Budget,
 		Approval:     deps.Approval,
+		Grants:       deps.Grants,
 		ReportWriter: nil,
+		Observer:     webui.NewBridge(live),
 		Stdout:       stdout,
 		Stderr:       stderr,
 	})
@@ -151,8 +292,8 @@ func runResume(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Wr
 	return ExitOK
 }
 
-func runCancel(args *Args, deps *Deps, stderr io.Writer) int {
-	if err := Cancel(args.TaskID, CancelDeps{Resume: deps.Resume}); err != nil {
+func runCancel(args *Args, deps *Deps, stdout, stderr io.Writer) int {
+	if err := Cancel(args.TaskID, CancelDeps{Resume: deps.Resume, Out: stdout}); err != nil {
 		fmt.Fprint(stderr, DisplayError(err, args.Debug))
 		return ExitCodeFor(err)
 	}
@@ -294,8 +435,9 @@ func runFix(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Write
 		Resume:  deps.Resume,
 		Worker:  deps.Worker,
 		Verify:  deps.Verifier,
-		Budget:  deps.Budget,
-		Approve: deps.Approval,
+		Budget:   deps.Budget,
+		Approve:  deps.Approval,
+		GrantStore: deps.Grants,
 	}, "fix")
 	if err != nil {
 		fmt.Fprint(stderr, DisplayError(err, args.Debug))

@@ -37,13 +37,20 @@ point for the user.
 following subcommands.
 
 - `aios run <plan>` — run a plan.
+- `aios fix <objective>` — plan an objective and run it.
 - `aios resume <task>` — resume a task.
 - `aios cancel <task>` — cancel a task.
 - `aios report <task>` — print the report.
 - `aios daemon start` — start the daemon.
 - `aios daemon stop` — stop the daemon.
+- `aios approve <approval-id>` — grant a pending
+  approval from another terminal.
+- `aios deny <approval-id>` — deny a pending approval
+  from another terminal.
 - `aios audit <task>` — show the audit log.
 - `aios init` — initialize the workspace.
+- `aios tools` — list the tools the agent can dispatch.
+- `aios web` — serve the operator UI.
 
 **REQ-CLI-FST-003** The command shall use
 `argparse` from the Go standard library.
@@ -67,6 +74,36 @@ subcommand shall wait for the grant.
 
 **REQ-CLI-RUN-004** The `run` subcommand shall
 print the report when the plan is finished.
+
+**REQ-CLI-RUN-005** The approval prompt shall display
+the action, the target, and the reason from the approval
+payload. A prompt that cannot name what it is asking to
+authorize does not let a human decide.
+
+**REQ-CLI-RUN-006** An approval shall authorize exactly
+one tool call, bound to the task, action, and target the
+operator was shown. A grant shall not carry over to a
+different task, action, or target, and shall not persist
+beyond the run that recorded it.
+
+**REQ-CLI-RUN-007** After an approval is granted, the
+retried tool call shall proceed without prompting again.
+Re-asking for one action once per retry is a defect.
+
+**REQ-CLI-RUN-008** When the subcommand cannot obtain an
+answer (closed stdin, no operator, no daemon), it shall
+treat the request as denied and shall not block
+indefinitely. An unanswered request must never be treated
+as approved.
+
+**REQ-CLI-RUN-009** The `--yes` flag shall
+auto-approve gated calls in place of prompting. Each
+auto-approval shall be announced on the output stream, so
+a transcript shows that no human decided.
+
+**REQ-CLI-RUN-010** When no approval handler can be
+reached, the subcommand shall report an actionable error
+naming the approval and the ways to resolve it.
 
 ### 5.3 Resume Subcommand
 
@@ -107,13 +144,36 @@ following messages.
 **REQ-CLI-DAE-004** The daemon shall write the
 approval events to the audit log.
 
-### 5.7 Audit Subcommand
+### 5.7 Approve / Deny Subcommands
+
+**REQ-CLI-APV-001** The `approve` subcommand shall
+take an approval id and shall send a `grant` message to
+the approval daemon on the configured socket.
+
+**REQ-CLI-APV-002** The `deny` subcommand shall take
+an approval id and shall send a `deny` message to the
+approval daemon on the configured socket.
+
+**REQ-CLI-APV-003** Both subcommands shall require the
+approval id as a positional argument and shall fail with
+a usage error when it is absent.
+
+**REQ-CLI-APV-004** Both subcommands shall work
+without a local policy file. Resolving what is pending
+must remain possible when the policy is the thing that is
+broken.
+
+**REQ-CLI-APV-005** When the daemon is unreachable,
+both subcommands shall report the socket path and name
+the `daemon start` command as the remedy.
+
+### 5.8 Audit Subcommand
 
 **REQ-CLI-AUD-001** The `audit` subcommand shall
 print the audit log for a task. The subcommand
 shall support the `tail` flag.
 
-### 5.8 Init Subcommand
+### 5.9 Init Subcommand
 
 **REQ-CLI-INI-001** The `init` subcommand shall
 create the workspace. The subcommand shall create
@@ -122,7 +182,7 @@ default policy file. The subcommand shall create
 the default egress file. The subcommand shall
 create the default price file.
 
-### 5.9 Error Display
+### 5.10 Error Display
 
 **REQ-CLI-ERR-001** The CLI shall print a clear
 error message when an error occurs. The message

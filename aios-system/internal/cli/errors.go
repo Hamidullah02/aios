@@ -25,6 +25,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ExitCode constants. Per REQ-CLI-ERR-003 the CLI returns:
@@ -58,6 +59,30 @@ func (e *CliError) Error() string {
 }
 
 func (e *CliError) Unwrap() error { return e.Cause }
+
+// display renders the error without repeating the cause.
+//
+// Error() always appends the cause, which is right for a log
+// line but wrong for the one-line operator display: when a
+// caller wraps a flag error as both What and Cause (both
+// "flag provided but not defined: -nosuchflag"), the operator
+// saw the same sentence twice in one line.
+//
+// So: if the What already contains the cause's text, show
+// What alone.
+func (e *CliError) display() string {
+	if e.Cause == nil {
+		return e.Kind + ": " + e.What
+	}
+	cause := e.Cause.Error()
+	if e.What == "" {
+		return e.Kind + ": " + cause
+	}
+	if strings.Contains(e.What, cause) {
+		return e.Kind + ": " + e.What
+	}
+	return fmt.Sprintf("%s: %s: %s", e.Kind, e.What, cause)
+}
 
 // Is allows errors.Is to match the underlying cause.
 func (e *CliError) Is(target error) bool {
@@ -103,7 +128,7 @@ func DisplayError(err error, debug bool) string {
 	}
 	out := ""
 	if cli, ok := err.(*CliError); ok {
-		out = "error: " + cli.Error() + "\n"
+		out = "error: " + cli.display() + "\n"
 	} else if cfg, ok := err.(*ConfigError); ok {
 		out = "config error: " + cfg.Error() + "\n"
 	} else if pl, ok := err.(*PlanLoadError); ok {

@@ -105,7 +105,15 @@ rules:
     reason: shell access is gated by the approval daemon
     approval:
       action: shell
-      resource: "{command}"
+      # Tool arguments are referenced as {arg.<name>}, not a
+      # bare {<name>}. This shipped as {command} and the
+      # template engine rejects it ("unknown placeholder"), so
+      # the policy this command writes could not be loaded by
+      # the very tool it gated: every run_shell call failed
+      # with a config error instead of raising the approval
+      # prompt this rule exists to gate. The reserved names
+      # are task, tool, path, host, actor, tier.
+      resource: "{arg.command}"
       reason: "run a shell command"
   - id: allow-ask-user
     match:

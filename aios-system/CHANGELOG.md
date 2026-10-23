@@ -1,4 +1,97 @@
 # Changelog
+
+## v0.42.0 — approvals a human can actually answer
+
+The default policy gates `run_shell` with `ask`, and the
+policy gateway, the approvals service, the daemon, and the
+approval audit rows were all present and correct. None of it
+was reachable. `aios run` against any plan that touched a
+gated tool stopped with:
+
+    error: runtime: waiting for approval ask:t1
+
+and exit code 2. That message named a task, not a decision,
+and no command anywhere could resolve it. The feature meant
+to stop an agent running a shell command without a human was
+the one thing a human could not complete. Three separate
+defects sat behind that:
+
+**1. No handler was ever wired.** `Deps.Approval` existed and
+was read by `runWithApprovals`, but nothing ever assigned it,
+so the "no handler" branch always won. Added
+`ApprovalPrompt` (a terminal prompt showing the action,
+target, and reason) and `DaemonApprovalHandler` (resolves
+through a running daemon). `newApprovalHandler` picks between
+them: `--yes` auto-approves, an explicit `--socket` uses the
+daemon, otherwise the operator is asked at the terminal.
+
+**2. Approving changed nothing.** The tool bus rejected every
+`ask` decision unconditionally:
+
+    case decision.Action == policy.ActionAsk:
+        return Result{...}, fmt.Errorf("... requires approval: %s")
+
+So the operator answered "yes", the orchestrator retried the
+task, the bus returned the same `ask` for the same arguments,
+and the operator was prompted a second time about the identical
+command — then the second answer was taken as the answer, so a
+single "yes" ended as a run failure on a denial nobody gave.
+The bus now consults an `ApprovalGrantChecker` before
+rejecting, and a grant is keyed on the call's identity
+(task, action, target) rather than the approval id. Keying on
+the id could not work: `policy.decisionFor` mints a fresh
+UUIDv4 per decision, so a retry never reuses one.
+
+**3. The prompt had nothing to show.** The bus's `ask` error
+was a formatted string, so the worker recovered it with
+`strings.Contains(err.Error(), "requires approval")` and then
+threw the payload away, inventing the id as `"ask:"+taskID`.
+The operator was asked to approve an opaque string. The bus
+now returns a typed `*tools.ApprovalRequiredError` carrying the
+approval id and payload, and the worker matches it with
+`errors.As`.
+
+A grant authorises exactly one call, in one run, and is never
+persisted. The task, action, and target are all part of the
+key, so approving `rm build/out.txt` cannot authorise `rm /`,
+and approving a call in one task cannot silently authorise the
+same command in a later task. That is deliberately narrower
+than "remember my answer": the policy author chose `ask`
+precisely because the action should not be rubber-stamped by
+history.
+
+**Unanswered means denied.** A run with no stdin (a CI job, a
+pipe), no operator, or no daemon within the timeout is denied,
+never approved and never left hanging. A gate that cannot be
+answered must not fall open.
+
+Also added:
+
+- **`aios approve <id>` / `aios deny <id>`**, over the
+  daemon socket, so an operator can decide from a second
+  terminal or a separate admin tool rather than from the
+  terminal the run is attached to. Both work without a local
+  policy file — a broken policy is exactly when someone most
+  needs to clear what is pending.
+- **`--yes`** for unattended runs. Every auto-approval is
+  announced on stderr, so a transcript shows that no human
+  decided.
+- An actionable error when no handler can be reached, naming
+  the approval and the ways to resolve it, in place of the
+  bare `runtime: waiting for approval` sentinel.
+- `--yes`, `approve`, `deny`, `fix`, `tools`, and `web`
+  documented in the CLI SRS (REQ-CLI-FST-002 listed only seven
+  subcommands and omitted everything added since), plus
+  REQ-CLI-RUN-005 to 010 and a REQ-CLI-APV section for the
+  behaviour that had been specified as a single sentence
+  ("shall show the approval prompt") and never specified at
+  all.
+
+Verified end to end on a gated `run_shell` plan: one prompt,
+one retry, `Stopped: completed`. The `n` path stops the run
+with `operator denied the action`; the closed-stdin path
+denies without hanging; `--yes` announces each grant and
+completes.
 v0.41.0 — embedded web UI: multi-agent panels, panel
 customisation, agent communication
 

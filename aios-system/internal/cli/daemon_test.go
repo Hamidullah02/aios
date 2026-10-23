@@ -34,14 +34,22 @@ func TestDaemon_StartStop(t *testing.T) {
 	defer cancel()
 	// Start in a goroutine; Stop() from the test.
 	go func() { _ = d.Start(ctx) }()
-	// Wait for the socket to appear.
+	// Wait for both files.
+	//
+	// The pid file used to be written after the bind, so
+	// "socket is up" did not imply "pid file is up" and this
+	// stat raced it. Start now writes the pid first, but the
+	// test still waits for what it asserts on rather than
+	// inferring it from a different signal.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, err := os.Stat(sock); err == nil {
+		_, sockErr := os.Stat(sock)
+		_, pidErr := os.Stat(pid)
+		if sockErr == nil && pidErr == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("socket did not appear")
+			t.Fatalf("daemon did not come up: socket=%v pid=%v", sockErr, pidErr)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
