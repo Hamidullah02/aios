@@ -3,6 +3,15 @@
 *.cover
 *.coverprofile
 
+# Local test-run transcripts. These are console output written
+# during a local `go test` pass, not source. The .gitignore
+# patterns for *.out / *.cover do not cover a plain .txt, so
+# they were swept into a commit by accident.
+gotest.txt
+tcount.txt
+final_test.txt
+test-output.txt
+
 # Test artifacts (test run output, not source)
 var/
 var/checkpoints/
