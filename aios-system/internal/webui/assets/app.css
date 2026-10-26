@@ -237,8 +237,18 @@ body {
 
 /* Respect the OS preference: a running dot must not keep
    animating for an operator who asked for less motion. */
+/* The pulse says "this is happening now" without a spinner and
+ * without a layout shift: only the dot's opacity changes, so
+ * nothing around it moves. */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .agent[data-status="running"] .dot { animation: none; }
+  .task[data-status="planning"] .dot,
+  .task[data-status="running"] .dot { animation: none; }
   * { scroll-behavior: auto !important; }
 }
 
@@ -281,6 +291,106 @@ body {
 .audit-agent { color: var(--accent); flex: none; min-width: 44px; }
 .audit-text { color: var(--muted); overflow-wrap: anywhere; }
 
+/* ---- the task bar ---- */
+
+/* The task bar is the product's front door. It sits above every
+ * panel and above the fold, because the first thing anybody
+ * opens this page to do is give the product something to do.
+ *
+ * It is deliberately one field. Every additional input is a
+ * question the operator has to answer before they can start,
+ * and a question they cannot answer is a wall. The system works
+ * out the rest. */
+.ask {
+  padding: 18px 16px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.ask-form { max-width: 900px; margin: 0 auto; }
+
+.ask-label {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* The input is the biggest touch target on the page: it is the
+ * only thing the operator has to touch to start work. */
+.ask-row { display: flex; gap: 8px; }
+
+.ask-row input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  font: inherit;
+  font-size: 15px;
+  min-width: 0;
+}
+.ask-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.ask-row input:disabled { opacity: .6; cursor: not-allowed; }
+.ask-row .btn { padding: 11px 20px; font-size: 15px; }
+
+.ask-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 1.2em;
+}
+.ask-note[data-kind="error"] { color: var(--err); }
+.ask-note[data-kind="unavailable"] { color: var(--warn); }
+
+/* ---- task cards ---- */
+
+.tasks { display: flex; flex-direction: column; gap: 10px; }
+
+.task {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.task header { display: flex; align-items: flex-start; gap: 8px; }
+
+/* The goal is the operator's own words and is the first thing on
+ * the card. It is set at reading size, not caption size: when
+ * someone comes back to the page to check on the job they asked
+ * for, this is what they scan for. */
+.task-goal { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+
+.task-steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.task-steps li { margin: 2px 0; overflow-wrap: anywhere; }
+
+.task-detail { margin: 7px 0 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.task-result { margin: 7px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+
+.task[data-status="planning"] { border-left-color: var(--accent); }
+.task[data-status="planning"] .dot { background: var(--accent); animation: pulse 1.3s ease-in-out infinite; }
+.task[data-status="running"] { border-left-color: var(--accent); }
+.task[data-status="running"] .dot { background: var(--accent); animation: pulse 1.3s ease-in-out infinite; }
+.task[data-status="blocked"] { border-left-color: var(--warn); }
+.task[data-status="blocked"] .dot { background: var(--warn); }
+.task[data-status="done"] { border-left-color: var(--ok); }
+.task[data-status="done"] .dot { background: var(--ok); }
+.task[data-status="done"] .task-result { color: var(--ok); }
+.task[data-status="failed"] { border-left-color: var(--err); }
+.task[data-status="failed"] .dot { background: var(--err); }
+.task[data-status="failed"] .task-detail { color: var(--err); }
+
 /* ---- narrow screens ---- */
 
 @media (max-width: 720px) {
@@ -289,4 +399,5 @@ body {
      them into a phone is worse than stacking. */
   .panel { grid-column: 1 / -1 !important; }
   .compose { grid-template-columns: 1fr; }
+  .ask-row { flex-direction: column; }
 }

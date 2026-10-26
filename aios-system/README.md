@@ -2,6 +2,90 @@
 
 The aios system. Foundation module is `internal/core/`.
 
+This directory is the Go module. The repository front page is one
+level up.
+
+## Install
+
+macOS and Linux:
+
+```
+curl -fsSL https://raw.githubusercontent.com/Hamidullah02/aios/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/Hamidullah02/aios/main/install.ps1 | iex
+```
+
+The installer downloads a prebuilt binary for your machine, checks
+that it runs, and puts it on your PATH. There is no Go toolchain
+needed and nothing to compile.
+
+From source instead:
+
+```
+go install github.com/sadi/aios-system/cmd/aios@latest
+```
+
+## Your model key
+
+The system needs one model key to turn a sentence into a plan. Put
+it in a `.env` file in the directory you will run `aios` from:
+
+```
+OPENROUTER_API_KEY=sk-or-...
+```
+
+On Windows, write it with `-Encoding ascii` so the file does not
+start with a byte-order mark:
+
+```powershell
+Set-Content -Path .env -Value 'OPENROUTER_API_KEY=sk-or-...' -Encoding ascii
+```
+
+The `.env` is read on startup, and it is searched for from the
+directory of your `--config` file and from the directory you are
+standing in, upwards. A key you exported in your shell wins over
+the file, so you can override it for one command.
+
+Three providers work: **OpenRouter** (`OPENROUTER_API_KEY`),
+**OpenAI** (`OPENAI_API_KEY`), and **Anthropic**
+(`ANTHROPIC_API_KEY`).
+
+**OpenRouter is the default.** The default model is
+`nvidia/nemotron-3-ultra-550b-a55b:free` -- a free NVIDIA Nemotron
+that is good at the one thing the planner asks of it: emitting a
+JSON object and nothing else. A first run costs nothing. Use
+`--model` to pick another one:
+
+```
+aios fix "summarise reports/q3.csv" --model nvidia/nemotron-3-ultra-550b-a55b
+```
+
+## First run
+
+There is nothing to set up. Start it in the directory you want the
+agent to work in:
+
+```
+aios web
+```
+
+The first run creates a `var/` folder beside you holding the
+policy, the price table, and the audit log, and tells you it has
+done so. **The agent works in the directory you are standing in**,
+so a file it creates lands next to you. Its own settings stay in
+`var/`.
+
+The policy it writes allows reading, searching, and editing files
+in that directory. Running a shell command is gated: you are asked
+before it happens. Edit `var/policy.yaml` to change any of that.
+
+Running `aios init` is still useful if you want to set the policy
+up before starting -- but it is not a step you have to discover.
+
 ## The operator UI
 
 The UI is embedded in the binary -- no npm, no sidecar assets. It
@@ -33,6 +117,46 @@ request whose `Origin` is not its own origin. `aios web --addr`
 must stay on loopback unless you understand what you are exposing;
 `webui.Config.AllowedHosts` is the escape hatch for an operator
 who reaches the UI through their own hostname.
+
+### Giving it something to do
+
+The page opens with one field: **what do you want done?** Type a
+sentence and press Start. The system works out the rest -- it
+turns the sentence into a plan, repairs the plan if the plan is
+wrong, and runs it. There is no plan file to write, no policy to
+choose, and no terminal to open.
+
+```
+aios web
+```
+
+then type `summarise the sales numbers in reports/q3.csv` and
+press Start. The task appears on the **Your tasks** panel with the
+steps it took, and a card moves from planning to running to done
+while you watch.
+
+The same thing over HTTP, for a script or another tool:
+
+```
+curl -X POST http://127.0.0.1:7755/api/tasks \
+  -H "X-Aios-Token: $AIOS_WEB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"goal":"summarise the sales numbers in reports/q3.csv"}'
+```
+
+`POST /api/messages` with `"from":"operator"` does the same thing
+and returns the task id as well. A message from an *agent* stays a
+note between agents and starts nothing.
+
+Earlier requests stay in the conversation, so a follow-up can
+refer back to them: after `the numbers are in reports/q3.csv`, a
+request for `summarise it` is planned with that file in mind.
+
+**The server needs a model key to plan.** Without one the goal is
+accepted and the task card says so in words -- no AI model key is
+configured -- and it names the variable to set. `aios web` still
+serves and still shows past activity; it just cannot start new work.
+See **Your model key** above.
 
 ## Network egress
 
@@ -66,9 +190,45 @@ host that is not on the list is refused before a socket is opened.
 `HTTP_PROXY`, opens a raw socket, or speaks a protocol other than
 HTTP is not stopped by the proxy. The honest claim is: *a
 well-behaved child in a gated tool call can only reach the hosts you
-listed*. Real isolation -- namespaces, a container, a restricted
-token on Windows -- is not in this version, and the `sandbox` package
-doc says so.
+listed*. On Linux the network namespace is a second, stronger
+layer -- see **Process isolation** below -- but on macOS and
+Windows the proxy is the only network boundary.
+
+## Process isolation
+
+Every subprocess a run starts is contained. `--isolation` picks the
+level:
+
+- `auto` (the default) -- use the Linux namespaces when the
+  platform and the kernel allow them, and fall back to the weaker
+  containment when they do not.
+- `namespaces` -- require the namespaces. A run that cannot have
+  them fails rather than running with less isolation than you
+  asked for.
+- `none` -- no namespace isolation. The process-group and Job
+  Object containment still apply.
+
+What is in force either way:
+
+- **The process tree dies with the run.** The child gets its own
+  process group on Linux and macOS, and its own Job Object on
+  Windows. A command that backgrounds work -- `npm run dev &`, a
+  shell that spawns a compiler -- does not leave that work running
+  after the timeout.
+- **On Windows the kernel enforces the limits.** The Job Object
+  caps the process count and the job's committed memory, and kills
+  every process in the job when it closes.
+- **On Linux the child is in its own namespaces.** User, network,
+  mount and pid. The user namespace maps the child's uid 0 onto
+  an unprivileged uid on the host, so a child that finds a setuid
+  binary is confined to the identity you granted. The network
+  namespace gives the child an empty network stack, which is what
+  makes the egress proxy the only way out.
+
+**What this is not.** It is not a container. There is no chroot, no
+seccomp filter and no cgroup memory cap on Linux. A child in a
+user namespace can still read every file you can read. For a hard
+guarantee, run aios itself inside a container.
 
 ## Layout
 
@@ -112,6 +272,33 @@ aios-system/
 - `aios-env.ps1` sets these in the current shell. Source it before any `go`
   command: `powershell -ExecutionPolicy Bypass -Command "& .\aios-env.ps1; go test ./..."`.
 - `CGO_ENABLED=0`. The audit log uses the pure-Go `modernc.org/sqlite` driver.
+- The race detector needs cgo, so it needs a C compiler. One is present:
+  `C:\msys64\ucrt64\bin\gcc.exe`. To run it:
+  ```powershell
+  $env:CGO_ENABLED='1'
+  $env:CC='C:\msys64\ucrt64\bin\gcc.exe'
+  $env:PATH='C:\msys64\ucrt64\bin;' + $env:PATH
+  go test -race ./...
+  ```
+  `CC` alone is not enough: cgo also shells out to `gcc` by name, so the
+  compiler's directory has to be on `PATH`. Run this before trusting any
+  concurrency change — it has already caught two real data races that the
+  plain test suite did not.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull
+request. It has three jobs:
+
+| job | what it does |
+| --- | --- |
+| `test` | `go vet ./...` and `go test ./...` with `CGO_ENABLED=0`, matching how the binaries are built |
+| `race` | `go test -race ./...` with `CGO_ENABLED=1` |
+| `cross-compile` | builds and vets all five release targets (linux/darwin on amd64+arm64, windows on amd64) |
+
+The release workflow runs the same checks, including the race detector,
+before it packages a binary. It is not enough to have CI on pull requests:
+a tag can be pushed without one ever being opened.
 
 ## Notes on the doc set
 

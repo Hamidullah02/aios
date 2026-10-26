@@ -38,8 +38,23 @@ func Init(workspace string) (created []string, existed []string, err error) {
 		rel  string
 		body string
 	}{
-		{"policy.yaml", defaultPolicyYAML},
-		{"egress.yaml", defaultEgressYAML},
+		// The policy and the egress list are the FIRST-RUN
+		// ones, not the read-only defaults. `aios init` and the
+		// implicit first run must produce the same workspace:
+		// an operator who runs init and an operator who does not
+		// should end up with a tool that behaves the same way.
+		//
+		// The read-only default was wrong for the first run of
+		// a tool whose job is to do what was asked: the operator
+		// said "write the word hello into a file called hi.txt"
+		// and the run failed with "write denied by policy: no
+		// rule matched; default deny".
+		//
+		// The policy is generated from the registered tool set,
+		// so it cannot name a tool that does not exist or omit
+		// one that does.
+		{"policy.yaml", firstRunPolicyYAMLFor(productionToolSet(nil, nil))},
+		{"egress.yaml", firstRunEgressYAML},
 		{"prices.yaml", defaultPricesYAML},
 		{"config.yaml", defaultConfigYAML},
 	}
@@ -136,6 +151,11 @@ const defaultPricesYAML = `# aios default price table. REQ-MOD-PRC-001.
 # models.LoadPriceTable reads; a list-shaped file is
 # silently treated as empty (v0.33.0 fix: the previous
 # scaffold wrote a list the loader could not read).
+#
+# The OpenRouter models are free, so their price is zero.
+# A model with no price row is a configuration error: the
+# router refuses the call rather than reporting a cost it
+# cannot know.
 prices:
   gpt-4o:
     input_per_1k: 0.005
@@ -143,6 +163,12 @@ prices:
   claude-sonnet-4-5:
     input_per_1k: 0.003
     output_per_1k: 0.015
+  nvidia/nemotron-3-ultra-550b-a55b:free:
+    input_per_1k: 0
+    output_per_1k: 0
+  nvidia/nemotron-3-super-120b-a12b:free:
+    input_per_1k: 0
+    output_per_1k: 0
 `
 
 const defaultConfigYAML = `# aios default config. REQ-CLI-DAT-001.

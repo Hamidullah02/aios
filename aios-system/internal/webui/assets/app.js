@@ -15,10 +15,33 @@
  */
 'use strict';
 
+// OPERATOR_SENDER is the reserved sender id for the operator's
+// own messages. A message from an agent is a note between
+// agents; a message from the operator is a request for work, and
+// the server turns it into a plan.
+const OPERATOR_SENDER = 'operator';
+
 const state = {
   agents: [],
   messages: [],
   layout: null,
+  // tasks are the things an operator asked for from the
+  // browser, and what became of them. This is the thing the
+  // UI is actually for: the agent panels below are the
+  // machinery, these are the jobs.
+  tasks: [],
+  // canSubmit says whether THIS server can start work. When it
+  // is false the composer is replaced with an explanation,
+  // because a Start button that cannot work is worse than no
+  // Start button at all.
+  canSubmit: false,
+  // askBusy is true while a task request is in flight. The
+  // Start button stays disabled for the duration, so a second
+  // click cannot queue a second run. It is separate from
+  // canSubmit because the two disable the button for different
+  // reasons: one is the server's capability, the other is the
+  // operator's own request already in flight.
+  askBusy: false,
   // approvals are the requests waiting on a human decision.
   // canResolve says whether THIS server can apply one; when it
   // is false (`aios web` as a separate process) the buttons are
@@ -92,6 +115,8 @@ function connect() {
     const snap = JSON.parse(e.data);
     state.agents = snap.agents || [];
     state.messages = snap.messages || [];
+    state.tasks = snap.tasks || [];
+    state.canSubmit = !!snap.can_submit_tasks;
     state.approvals = snap.approvals || [];
     state.canResolveApprovals = !!snap.can_resolve_approvals;
     if (snap.layout) { state.layout = snap.layout; renderLayout(); }
@@ -106,6 +131,17 @@ function connect() {
   es.addEventListener('approvals', (e) => {
     state.approvals = JSON.parse(e.data) || [];
     renderApprovals();
+  });
+
+  // A task update arrives as one task, not the whole list: a task
+  // changes status many times a second while it runs, and
+  // replacing the whole list on each of those would make every
+  // open tab re-render everything for one card.
+  es.addEventListener('task', (e) => {
+    const t = JSON.parse(e.data);
+    const i = state.tasks.findIndex((x) => x.id === t.id);
+    if (i >= 0) state.tasks[i] = t; else state.tasks.push(t);
+    renderTasks();
   });
 
   es.addEventListener('agent', (e) => {
@@ -177,11 +213,172 @@ function showSessionExpired() {
 
 function render() {
   renderLayout();
+  renderTasks();
   renderAgents();
   renderApprovals();
   renderComms();
   renderAudit();
   refreshAgentSelects();
+  // The composer's enabled state comes from the server's
+  // capability flag, so it is applied wherever the snapshot is
+  // applied rather than once at load. Without this the button
+  // was left enabled on a server that cannot start work.
+  setAskEnabled();
+}
+
+/* ---------- tasks ---------- */
+
+/* renderTasks draws the jobs the operator asked for.
+ *
+ * The card leads with the operator's own words, because the
+ * request is the thing they will look for when they come back to
+ * the page. Everything else -- the steps, the status, the
+ * outcome -- hangs off that. */
+function renderTasks() {
+  const body = $('[data-panel="tasks"] [data-role="body"]');
+  if (!body) return;
+
+  const count = $('[data-panel="tasks"] [data-role="count"]');
+  if (count) count.textContent = state.tasks.length || '';
+
+  if (!state.tasks.length) {
+    body.innerHTML = '<p class="empty">Nothing asked for yet.</p>';
+    return;
+  }
+
+  body.innerHTML = '';
+  const tpl = document.getElementById('task-card');
+  // Newest first: the task the operator just submitted is the
+  // one they are looking at.
+  const tasks = state.tasks.slice().reverse();
+  for (const t of tasks) {
+    const node = tpl.content.firstElementChild.cloneNode(true);
+    node.dataset.status = t.status || 'planning';
+    $('.task-goal', node).textContent = t.goal || '';
+
+    const steps = $('.task-steps', node);
+    if (t.plan_summary && t.plan_summary.length) {
+      for (const line of t.plan_summary) {
+        const li = document.createElement('li');
+        // textContent, never innerHTML: the plan came from a
+        // model and must never be parsed as markup.
+        li.textContent = line;
+        steps.appendChild(li);
+      }
+    } else {
+      steps.hidden = true;
+    }
+
+    const detail = $('.task-detail', node);
+    detail.textContent = t.detail || '';
+    detail.hidden = !t.detail;
+
+    const result = $('.task-result', node);
+    result.textContent = t.result || '';
+    result.hidden = !t.result;
+
+    body.appendChild(node);
+  }
+}
+
+/* ---------- the composer ---------- */
+
+/* wireAsk wires the one field that matters.
+ *
+ * The operator types what they want done. There is no plan to
+ * fill in, no tool to choose, no model to pick, and no flag to
+ * understand. Whatever they type is the request; the server
+ * works out the rest.
+ *
+ * The button is disabled while a request is in flight and the
+ * note says why. Silently ignoring a second click would leave
+ * the operator wondering whether their second request was
+ * accepted. */
+function wireAsk() {
+  const form = $('#ask-form');
+  const input = $('#ask-input');
+  const note = $('#ask-note');
+  const button = $('#ask-submit');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const goal = input.value.trim();
+    if (!goal) { input.focus(); return; }
+
+    state.askBusy = true;
+    button.disabled = true;
+    note.dataset.kind = '';
+    note.textContent = 'starting…';
+    try {
+      const res = await apiFetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal: goal }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // The server says what went wrong in words. Show that
+        // rather than a generic failure: the difference between
+        // "no AI model key is configured" and "something went
+        // wrong" is the difference between a fixable problem
+        // and a dead end.
+        note.dataset.kind = 'error';
+        note.textContent = data.error || 'could not start that';
+        state.askBusy = false;
+        setAskEnabled();
+        return;
+      }
+      input.value = '';
+      note.textContent = 'started.';
+      // The task card arrives over the event stream; showing
+      // it immediately here would mean two sources of truth for
+      // the same card.
+      setTimeout(() => { if (note.textContent === 'started.') note.textContent = ''; }, 2500);
+      // The request landed, so the composer is free again. The
+      // server may refuse the next one while this run is in
+      // flight, and it says so in words when it does.
+      state.askBusy = false;
+      setAskEnabled();
+    } catch (err) {
+      note.dataset.kind = 'error';
+      note.textContent = 'could not start that: ' + err.message;
+      state.askBusy = false;
+      setAskEnabled();
+    }
+  });
+}
+
+/* setAskEnabled turns the composer on or off.
+ *
+ * A server that cannot start tasks must not show a Start button.
+ * It shows the field disabled and the reason, so the operator
+ * knows the product is working and this particular deployment
+ * is the one that cannot take work. */
+function setAskEnabled() {
+  const input = $('#ask-input');
+  const button = $('#ask-submit');
+  const note = $('#ask-note');
+  if (!input || !button) return;
+  if (state.askBusy) {
+    // A request is in flight. The button stays off until it
+    // lands, and the note keeps saying what is happening.
+    input.disabled = true;
+    button.disabled = true;
+    return;
+  }
+  if (state.canSubmit) {
+    input.disabled = false;
+    button.disabled = false;
+    if (note.dataset.kind === 'unavailable') {
+      note.textContent = '';
+      note.dataset.kind = '';
+    }
+    return;
+  }
+  input.disabled = true;
+  button.disabled = true;
+  note.dataset.kind = 'unavailable';
+  note.textContent = 'This server cannot start new tasks. It can only show work that is already running.';
 }
 
 /* ---------- approvals ---------- */
@@ -202,7 +399,7 @@ function renderApprovals() {
   if (count) count.textContent = state.approvals.length || '';
 
   if (!state.approvals.length) {
-    body.innerHTML = '<p class="empty">Nothing waiting for approval.</p>';
+    body.innerHTML = '<p class="empty">Nothing waiting for you.</p>';
     return;
   }
 
@@ -210,7 +407,7 @@ function renderApprovals() {
   for (const a of state.approvals) {
     const node = $('#approval-card').content.firstElementChild.cloneNode(true);
     $('.approval-action', node).textContent = a.action || 'action';
-    $('.approval-task', node).textContent = a.task_id ? ('task ' + a.task_id) : (a.id || '');
+    $('.approval-task', node).textContent = a.task_id ? ('step ' + a.task_id) : (a.id || '');
     $('.approval-target', node).textContent = a.target || '(no target)';
     const reason = $('.approval-reason', node);
     reason.textContent = a.reason || '';
@@ -302,7 +499,7 @@ function renderAgents() {
   $('[data-panel="agents"] [data-role="count"]').textContent = agents.length || '';
 
   if (!agents.length) {
-    body.innerHTML = '<p class="empty">No agents yet.</p>';
+    body.innerHTML = '<p class="empty">Nothing running yet.</p>';
     return;
   }
   body.innerHTML = '';
@@ -311,7 +508,7 @@ function renderAgents() {
     const node = tpl.content.firstElementChild.cloneNode(true);
     node.dataset.status = a.status || 'idle';
     $('.agent-label', node).textContent = a.label || a.id;
-    $('.agent-tool', node).textContent = a.tool || (a.task_id ? 'task ' + a.task_id : '');
+    $('.agent-tool', node).textContent = a.tool || (a.task_id ? 'step ' + a.task_id : '');
     $('.agent-detail', node).textContent = a.detail || '';
     body.appendChild(node);
   }
@@ -400,6 +597,14 @@ function refreshAgentSelects() {
   const curFrom = from.value;
   const curTo = to.value;
   from.innerHTML = '';
+  // The operator is a sender like any other, and a message from
+  // the operator is a request for work. Without this option the
+  // From list only offered agents, so the one sender whose
+  // messages actually start something was the one the browser
+  // would not let you pick.
+  const op = document.createElement('option');
+  op.value = OPERATOR_SENDER; op.textContent = 'Me';
+  from.appendChild(op);
   for (const id of ids) {
     const o = document.createElement('option');
     o.value = id; o.textContent = id;
@@ -415,6 +620,7 @@ function refreshAgentSelects() {
     to.appendChild(o);
   }
   if (ids.includes(curFrom)) from.value = curFrom;
+  else if (curFrom === OPERATOR_SENDER) from.value = curFrom;
   if (curTo && ids.includes(curTo)) to.value = curTo;
 }
 
@@ -521,10 +727,21 @@ async function saveLayout() {
   }
 }
 
-/* ---------- compose ---------- */
+/* ---------- compose (agent messages) ---------- */
 
+/* The agent message box is for talking to the agents, not for
+ * giving the system work. The task composer at the top of the
+ * page is the entry point for work; this box is for the
+ * operator talking to a running agent.
+ *
+ * The one exception is the operator's own name in the From
+ * list. A message from the operator is a request for work: the
+ * server turns it into a plan and runs it. So the operator can
+ * start a task from either box, and both paths end in the same
+ * place. */
 function wireCompose() {
   const form = $('[data-role="compose"]');
+  if (!form) return;
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const from = $('[data-role="from"]', form);
@@ -582,6 +799,7 @@ function boot() {
     saveLayout();
   });
 
+  wireAsk();
   wireCompose();
   connect();
   // The panels do not exist until the first snapshot, so

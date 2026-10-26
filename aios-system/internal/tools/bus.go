@@ -113,6 +113,54 @@ func (b *Bus) Names() []string {
 	return out
 }
 
+// Spec is one tool's self-description.
+//
+// It is the same shape the planner consumes, but it lives
+// here rather than in the planner package so the bus can
+// report it without importing the planner.
+type Spec struct {
+	// Name is the tool's canonical name.
+	Name string
+	// Description is the human-readable summary the model
+	// reads when it chooses a tool.
+	Description string
+	// InputSchema is the raw JSON Schema for the tool's
+	// arguments.
+	InputSchema string
+	// Risk is the tool's risk tier, 0 (read-only) to 3.
+	Risk int
+}
+
+// Specs returns every registered tool's self-description,
+// keyed by the tool's canonical name.
+//
+// The bus is the one place that knows which tools exist, so
+// the planner's view of the tool set is derived from here
+// rather than maintained by hand. Before this method the
+// planner had a hand-written table of five tools while the
+// bus carried twenty-five, so twenty of them could not be
+// named in a plan however well they worked.
+//
+// A tool that does not implement tools.Spec still appears,
+// with a placeholder description and an empty schema. It is
+// better to tell the model that a tool's arguments are
+// undocumented than to hide the tool: the model can then
+// choose not to use it, whereas a hidden tool is a tool the
+// operator believes exists and cannot reach.
+func (b *Bus) Specs() map[string]Spec {
+	out := make(map[string]Spec, len(b.tools))
+	for name, tool := range b.tools {
+		description, schema := Describe(tool)
+		out[name] = Spec{
+			Name:        name,
+			Description: description,
+			InputSchema: schema,
+			Risk:        Tier(tool),
+		}
+	}
+	return out
+}
+
 // Dispatch runs the tool call. The bus returns a Result and
 // an error. A successful call has OK=true and a nil error;
 // a policy-deny has OK=false and ErrPolicyDeny wrapped in
@@ -186,10 +234,10 @@ func (b *Bus) Dispatch(name string, args map[string]any, ctx Context) (Result, e
 			// display but an id.
 			return Result{OK: false, Summary: "ask: " + policyReason},
 				&ApprovalRequiredError{
-					Tool:        name,
-					Reason:      policyReason,
-					ApprovalID:  approvalIDOf(decision),
-					Approval:    decision.Approval,
+					Tool:       name,
+					Reason:     policyReason,
+					ApprovalID: approvalIDOf(decision),
+					Approval:   decision.Approval,
 				}
 		}
 	}

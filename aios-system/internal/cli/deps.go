@@ -9,12 +9,10 @@ import (
 	"github.com/sadi/aios-system/internal/ask"
 	"github.com/sadi/aios-system/internal/core/audit"
 	"github.com/sadi/aios-system/internal/egress"
-	"github.com/sadi/aios-system/internal/memory"
 	"github.com/sadi/aios-system/internal/models"
 	"github.com/sadi/aios-system/internal/planner"
 	"github.com/sadi/aios-system/internal/policy"
 	"github.com/sadi/aios-system/internal/runtime"
-	"github.com/sadi/aios-system/internal/sandbox"
 	"github.com/sadi/aios-system/internal/tools"
 )
 
@@ -54,6 +52,19 @@ var bootstrapSubcommands = map[string]bool{
 	// inspect and clear what is pending.
 	CmdApprove: true,
 	CmdDeny:    true,
+	// `report` and `audit` READ the audit log. They dispatch
+	// no tool, so a policy cannot gate them and requiring one
+	// grants nothing.
+	//
+	// It cost an operator the ability to diagnose a broken
+	// workspace: `aios audit` -- the exact command they would
+	// reach for when something was wrong -- failed with
+	// "policy file is required" when the policy was missing or
+	// malformed. The policy is what a broken run is usually
+	// about, so the command that would tell them so was the one
+	// command they could not run.
+	CmdReport: true,
+	CmdAudit:  true,
 }
 
 // requiresPolicy reports whether the subcommand needs a
@@ -113,6 +124,15 @@ type Deps struct {
 	// the Router field is also exposed so tests can
 	// stub the model client.
 	Planner *planner.Planner
+	// FirstRunFiles lists the workspace files the
+	// first-run bootstrap created.
+	//
+	// It is empty for every run that found the workspace
+	// already set up. When it is not empty, the command
+	// tells the operator what was created, because a tool
+	// that silently writes four files into their project
+	// is a tool they will not trust the second time.
+	FirstRunFiles []string
 }
 
 // newApprovalHandler picks the approval strategy for this
@@ -208,6 +228,57 @@ func BuildDeps(args *Args) (*Deps, error) {
 	}
 	deps := &Deps{
 		Budget: runtime.Budget{},
+	}
+	// First run: make the workspace usable before anything
+	// else looks for it.
+	//
+	// Without this, `aios web` in a directory the operator has
+	// never used before served a UI whose submit button was
+	// dead, and the only way to fix it was to know that
+	// `aios init` existed. The install script's final
+	// instruction is "put your key in a .env file, then run
+	// aios web" -- it never mentions init, so an operator who
+	// followed it exactly got a broken product.
+	//
+	// The same was true of `aios fix`: it failed with "audit
+	// log open failed: .../var/aios.db (run `aios init`
+	// first)" because the var/ directory did not exist, so
+	// the database could not be created. `fix` is the command
+	// an operator reaches for; making them discover `init`
+	// first is not a reasonable expectation.
+	//
+	// The bootstrap is idempotent and never overwrites a file
+	// that already exists, so an operator who has tuned their
+	// policy keeps it. The workspace root becomes the
+	// operator's own directory, so a file the agent writes
+	// lands next to them rather than inside the tool's config
+	// folder.
+	//
+	// It runs for the commands that actually do work: web,
+	// fix, run, resume. The read-only commands (report,
+	// audit) and the setup commands (init, daemon) are left
+	// alone -- they either have nothing to bootstrap or are
+	// the bootstrap themselves.
+	if bootstrapEligible(args.Command) && args.Workspace == "" {
+		workspace, stateDir, created, err := ensureWorkspaceReady(".")
+		if err != nil {
+			return nil, &CliError{
+				Kind:  "config",
+				What:  "could not set up the workspace",
+				Cause: err,
+			}
+		}
+		args.Workspace = workspace
+		args.StateDir = stateDir
+		if args.ConfigPath == "" || args.ConfigPath == DefaultConfigPath {
+			args.ConfigPath = filepath.Join(stateDir, "config.yaml")
+		}
+		if args.LogPath == "" || args.LogPath == DefaultLogPath {
+			args.LogPath = filepath.Join(stateDir, "aios.db")
+		}
+		for _, path := range created {
+			deps.FirstRunFiles = append(deps.FirstRunFiles, path)
+		}
 	}
 	// Audit log: required for run / resume / report /
 	// audit / cancel. Optional for init and daemon start:
@@ -356,19 +427,40 @@ func BuildDeps(args *Args) (*Deps, error) {
 				_ = deps.Close()
 				return nil, err
 			}
-			// The `fix` subcommand now has a router.
-			// Wire the SelfCheckTool (it needs a Judge)
-			// into the bus late. The bus has a Register
-			// method for exactly this case.
-			if deps.Router != nil {
-				// Only add the SelfCheckTool here.
-				// RunTestsTool was already wired by
-				// wireAgentLoop.
-				late := wireSelfCheckOnly(deps.Router, deps.Audit)
-				if late != nil {
-					deps.Bus.Register("self_check", late)
-				}
+		}
+	}
+	// The `web` server needs the same agent loop as `fix` -- a
+	// planner to turn a sentence into a plan, a worker to run
+	// it, and a verifier to check it -- because the whole point
+	// of the web UI is that an operator can give the product
+	// something to do from a browser.
+	//
+	// It is wired outside the requiresPolicy block because
+	// `web` is a bootstrap subcommand (it must serve before a
+	// policy exists), but the agent loop itself is only built
+	// when a policy IS available. Without one the bus would
+	// allow every tool call, which is exactly the authority the
+	// policy exists to withhold, so the loop is left unwired and
+	// the UI says tasks cannot be started here.
+	//
+	// The planner is safe to wire either way: it only calls the
+	// model, and it never runs a tool.
+	if args.Command == CmdWeb && deps.Policy != nil {
+		if deps.Worker == nil {
+			// The grant store is created BEFORE the bus is
+			// wired: the bus holds a reference to it, so a
+			// store created afterwards would leave the bus
+			// re-asking the operator about every call they
+			// already approved.
+			deps.Grants = newGrantStore(deps.Approvals)
+			if err := wireAgentLoop(deps, args); err != nil {
+				_ = deps.Close()
+				return nil, err
 			}
+		}
+		if err := wirePlanner(deps, args); err != nil {
+			_ = deps.Close()
+			return nil, err
 		}
 	}
 	return deps, nil
@@ -398,67 +490,7 @@ func wireAgentLoop(deps *Deps, args *Args) error {
 			Cause: err,
 		}
 	}
-	toolSet := map[string]tools.Tool{
-		"read_file":    tools.ReadFileTool{},
-		"search_files": tools.SearchFilesTool{},
-		"write_file":   tools.WriteFileTool{},
-		"run_shell":    tools.RunShellTool{Runner: sandbox.NewSubprocessRunner()},
-		"ask_user":     askBusAdapter{tool: askTool},
-	}
-	// Verify-package tools. The RunTestsTool is always
-	// wired (no model dependency). SelfCheckTool is
-	// wired below after the router is built (only
-	// for `fix`).
-	verifyTools := wireVerifyTools(nil, deps.Audit)
-	for name, tool := range verifyTools {
-		toolSet[name] = tool
-	}
-	// v0.38.0: the rest of the doc-set tool set. The
-	// five tools above are the REQ-DOC-MIN minimum; the
-	// edit / git / search / image packages each ship a
-	// working tools.Tool implementation that was never
-	// registered with the bus, so a plan naming one of
-	// them got ToolNotFoundError. wireDocSetTools closes
-	// that gap; see internal/cli/docset_wiring.go for the
-	// per-package notes and the deliberate exclusions.
-	docSetTools := wireDocSetTools()
-	for name, tool := range docSetTools {
-		// Never shadow a tool that is already wired.
-		// The verify set wins on a name collision so a
-		// future rename in another package cannot
-		// silently change what run_tests resolves to.
-		if _, exists := toolSet[name]; exists {
-			continue
-		}
-		toolSet[name] = tool
-	}
-	// v0.39.0: the memory adapters. Unlike the literal set
-	// above these need a constructed *memory.Memory, and
-	// both tools share one instance so a write is visible
-	// to a read in the same process.
-	//
-	// Construction is best-effort: a workspace whose data
-	// dir is unwritable still starts, the memory tools
-	// return a typed error rather than panicking, and every
-	// other tool keeps working. Failing the whole CLI over
-	// an unwritable memory directory would make the
-	// problem strictly worse than not having memory.
-	mem, memErr := memory.NewMemory(memory.MemoryConfig{})
-	if memErr != nil {
-		// Leave mem nil. wireMemoryTools still registers
-		// the two tools so `aios tools` shows them and a
-		// plan gets a clear "memory is not wired" error
-		// instead of ToolNotFoundError, which would send
-		// the operator looking for a policy problem.
-		mem = nil
-	}
-	memoryTools := wireMemoryTools(mem, deps.Audit)
-	for name, tool := range memoryTools {
-		if _, exists := toolSet[name]; exists {
-			continue
-		}
-		toolSet[name] = tool
-	}
+	toolSet := productionToolSet(askBusAdapter{tool: askTool}, deps.Audit)
 	// Build the bus. The bus owns the tool map, the
 	// policy gateway, and the audit log. The gateway
 	// is required for the agent loop: without it the
@@ -521,31 +553,66 @@ func fmtPath(p string) string {
 // The workspace is taken from args.Workspace (or
 // the dirname of args.ConfigPath as a fallback).
 // The router reads the egress, prices, and
-// capabilities files in that workspace.
+// capabilities files from the STATE directory, not the
+// workspace: the workspace is where the agent writes, and
+// the tool's own configuration does not belong in the
+// operator's project folder.
 func wirePlanner(deps *Deps, args *Args) error {
 	workspace := args.Workspace
 	if workspace == "" {
 		workspace = filepath.Dir(args.ConfigPath)
 	}
 	workspace = ensureWorkspace(workspace)
-	router, prices, allow, err := buildRouter(workspace)
+	stateDir := args.StateDir
+	if stateDir == "" {
+		stateDir = workspace
+	}
+	router, prices, allow, err := buildRouter(stateDir)
 	if err != nil {
 		return err
 	}
 	deps.Router = router
 	deps.Prices = prices
 	deps.Egress = allow
+	// The SelfCheckTool needs a Judge, and the Judge needs
+	// the router, so the tool can only be built once the
+	// router exists. It is registered HERE, before the
+	// planner's tool list is read, so the planner can offer
+	// self_check to the model.
+	//
+	// It used to be registered after the planner was built,
+	// which meant self_check was dispatchable but not
+	// plannable: the model could never choose it, because it
+	// was not in the prompt. A tool the model cannot name is
+	// a tool the agent does not have.
+	if deps.Bus != nil {
+		if late := wireSelfCheckOnly(router, deps.Audit); late != nil {
+			deps.Bus.Register("self_check", late)
+		}
+	}
 	// The planner verifies each candidate plan with the
 	// same CodeFirstVerifier the planner package's
 	// tests use. The verifier is the typed bridge
 	// between the planner (which speaks ToolSpec) and
 	// the bus (which speaks Tool).
-	tools := plannerToolSpecs()
-	verifier := planner.NewCodeFirstVerifier(tools)
+	//
+	// The tool list is read from the bus rather than
+	// written out here, so the planner can name every tool
+	// the bus can dispatch. See plannerToolSpecs.
+	toolSpecs := plannerToolSpecs(deps.Bus)
+	verifier := planner.NewCodeFirstVerifier(toolSpecs)
 	pl, err := planner.NewPlanner(planner.Config{
 		Router:   router,
-		Tools:    tools,
+		Tools:    toolSpecs,
 		Verifier: verifier,
+		// The model the planner calls. The default is the
+		// free OpenRouter model; AIOS_MODEL overrides it.
+		// The planner package's own default ("gpt-4o") is
+		// not used here because it would route to a
+		// provider the operator has not given us a key for,
+		// and the failure would be a provider error rather
+		// than a configuration one.
+		DefaultModel: resolveModel(args.Model),
 	})
 	if err != nil {
 		return &CliError{

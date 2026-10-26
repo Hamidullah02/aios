@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/sadi/aios-system/internal/core/schemas"
 )
@@ -146,6 +147,24 @@ func (v *CodeFirstVerifier) checkToolCalls(plan *schemas.TaskPlan, errs PlanErro
 					Code:    CodeToolCallSchema,
 					Field:   fmt.Sprintf("%s.inputs.%d", base, j),
 					Message: "input is blank",
+				})
+				continue
+			}
+			// The worker splits each input on the first "="
+			// to build the tool's args map. An input with no
+			// "=" never becomes an argument: the tool is
+			// dispatched without it and rejects the call with
+			// "path is required". Catching it here means the
+			// repair loop can fix the plan instead of the run
+			// dying at the first tool call.
+			if !strings.Contains(in, "=") {
+				errs = append(errs, PlanError{
+					Code:  CodeToolCallSchema,
+					Field: fmt.Sprintf("%s.inputs.%d", base, j),
+					Message: fmt.Sprintf(
+						"input %q is not a tool argument; inputs must be \"key=value\" strings naming a property from the tool's input schema (for example \"path=notes.txt\")",
+						in,
+					),
 				})
 			}
 		}

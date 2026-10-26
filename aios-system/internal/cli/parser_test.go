@@ -159,13 +159,20 @@ func TestParse_GlobalFlagsBeforeSubcommand(t *testing.T) {
 }
 
 func TestParse_GlobalFlagsAfterSubcommand(t *testing.T) {
-	// The parser's convention is global flags BEFORE the
-	// subcommand. After is not supported; with the stdlib
-	// flag package, a flag after a positional is treated
-	// as a positional too. The test confirms the parser
-	// does not crash and at least reaches the validation
-	// step.
-	_, _ = Parse([]string{"aios", "run", "p.yaml", "--debug"}, &bytes.Buffer{})
+	// Global flags are accepted on either side of the
+	// subcommand. The full regression gate for this lives in
+	// parser_global_flags_test.go; this one pins the simple
+	// case next to the "before" case above.
+	a, err := Parse([]string{"aios", "run", "p.yaml", "--debug"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !a.Debug {
+		t.Error("Debug = false, want true")
+	}
+	if a.PlanPath != "p.yaml" {
+		t.Errorf("plan: %q", a.PlanPath)
+	}
 }
 
 func TestParse_RunMissingPlan(t *testing.T) {

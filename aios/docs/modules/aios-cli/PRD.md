@@ -16,6 +16,10 @@ The aios-cli module is in scope for this document.
 - The approval daemon.
 - The command parser.
 - The error display.
+- The operator UI, served by the `web` subcommand and by
+  `run --web`. The UI is the surface an operator watches a
+  run on and the surface a gated tool call is approved on,
+  so it is part of the CLI rather than a separate product.
 
 The aios-cli module is not in scope for this
 document.
@@ -76,6 +80,28 @@ An operator wants to start the daemon. The operator
 types `aios daemon start`. The CLI starts the
 daemon. The daemon listens for approval requests.
 
+An operator wants to watch a run. The operator types
+`aios run plan.yaml --web`. The CLI serves the operator
+UI and prints a link that carries the session token. The
+operator opens the link and sees the panels update as the
+plan runs.
+
+An operator wants to give the product something to do.
+The operator opens the UI and types what they want done
+in their own words. The CLI turns the sentence into a
+plan, repairs the plan if it is wrong, and runs it. The
+operator follows it on a task card. The operator does not
+write a plan, a policy, or a configuration file.
+
+An operator wants to approve a gated tool call from the
+browser. The UI shows the pending approval with the action
+and the target. The operator clicks "Allow once". The run
+continues.
+
+An operator wants to approve a gated tool call from
+another terminal. The operator types `aios approve <id>`.
+The CLI sends the grant to the daemon.
+
 ## 8. Functional Requirements Summary
 
 The aios-cli module provides the following
@@ -85,6 +111,7 @@ functions.
 - The approval daemon.
 - The command parser.
 - The error display.
+- The operator UI, behind a per-process session token.
 
 ## 9. Non-Functional Requirements Summary
 
@@ -102,13 +129,19 @@ functions.
 - The CLI sends the grant.
 - The CLI prints the report.
 - The CLI starts the daemon.
+- The CLI starts the daemon.
+- The operator UI refuses an unauthenticated request.
+- A gated tool call can be approved from the browser.
 - The test suite has a 100 percent pass rate.
 
 ## 11. Out of Scope
 
 - The web interface for the CLI.
 - The mobile interface for the CLI.
-- The remote access to the CLI.
+- The remote access to the CLI. The operator UI binds
+  loopback by default. Reaching it from another machine
+  is an explicit act of port forwarding, not a default.
+
 
 ## 12. Open Questions
 

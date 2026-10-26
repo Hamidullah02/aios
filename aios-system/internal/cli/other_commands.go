@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 
 	"github.com/sadi/aios-system/internal/core/audit"
@@ -14,11 +15,11 @@ import (
 
 // ResumeDeps is the wiring the resume subcommand needs.
 type ResumeDeps struct {
-	Audit   *audit.Log
-	Resume  *runtime.ResumeHandler
-	Worker  runtime.Worker
-	Verify  runtime.Verifier
-	Budget  runtime.Budget
+	Audit  *audit.Log
+	Resume *runtime.ResumeHandler
+	Worker runtime.Worker
+	Verify runtime.Verifier
+	Budget runtime.Budget
 	// GrantStore records the approvals granted during this
 	// run. The bus consults it so a retried task whose call
 	// the operator already approved proceeds instead of
@@ -151,6 +152,17 @@ func Report(taskID string, deps ReportDeps) error {
 	if err != nil {
 		return &CliError{Kind: "audit", What: "read", Cause: err}
 	}
+	// A task with no rows is a real answer, not a missing
+	// report. The JSON path used to print "null" -- valid
+	// JSON, and no use to anyone. The operator gets a message
+	// that says what happened and what to check.
+	if len(rows) == 0 {
+		return &CliError{
+			Kind: "user",
+			What: "no rows for task " + taskID +
+				" (the task may not have run, or its id may be wrong; `aios audit` lists the log)",
+		}
+	}
 	switch format {
 	case "json":
 		out, _ := json.MarshalIndent(rows, "", "  ")
@@ -164,12 +176,12 @@ func Report(taskID string, deps ReportDeps) error {
 			fmt.Fprintf(deps.Out, "| %d | %s | %d | %s |\n", r.SequenceNumber, r.Kind, r.TSNano, r.ContentHash)
 		}
 	case "html":
-		fmt.Fprintf(deps.Out, "<!doctype html><html><head><title>Report %s</title></head><body>\n", taskID)
-		fmt.Fprintf(deps.Out, "<h1>Report for %s</h1>\n<table border='1'>\n", taskID)
+		fmt.Fprintf(deps.Out, "<!doctype html><html><head><title>Report %s</title></head><body>\n", html.EscapeString(taskID))
+		fmt.Fprintf(deps.Out, "<h1>Report for %s</h1>\n<table border='1'>\n", html.EscapeString(taskID))
 		fmt.Fprintln(deps.Out, "<tr><th>seq</th><th>kind</th><th>ts_ns</th><th>hash</th></tr>")
 		for _, r := range rows {
 			fmt.Fprintf(deps.Out, "<tr><td>%d</td><td>%s</td><td>%d</td><td>%s</td></tr>\n",
-				r.SequenceNumber, r.Kind, r.TSNano, r.ContentHash)
+				r.SequenceNumber, html.EscapeString(r.Kind), r.TSNano, html.EscapeString(r.ContentHash))
 		}
 		fmt.Fprintln(deps.Out, "</table></body></html>")
 	default:
@@ -354,6 +366,7 @@ func planBudget(plan *schemas.TaskPlan, caller runtime.Budget) runtime.Budget {
 	}
 	return out
 }
+
 // taskIDOf extracts a task identifier from an approval
 // request for use in an error message.
 //

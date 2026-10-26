@@ -171,18 +171,37 @@ func TestRemember_RequiresContent(t *testing.T) {
 	}
 }
 
-// TestRemember_RejectsBadKind asserts the artifact
-// validator is not bypassed by the tool.
-func TestRemember_RejectsBadKind(t *testing.T) {
-	write := WriteTool{Mem: newTestMemory(t)}
+// TestRemember_FallsBackOnAnUnknownKind pins that an unknown
+// kind is a near-miss rather than a refusal.
+//
+// The model was asked to remember a fact and wrote kind
+// "fact", which is not one of the six kinds the memory knows.
+// The tool used to answer "kind must be one of task, file,
+// decision, observation, tool_result, model_output; got
+// \"fact\"" and the whole task failed.
+//
+// The agent understood what it wanted to remember. The kind was
+// a label, and "observation" -- the kind that means "the agent
+// noticed something" -- is what it actually was. The memory
+// package's own validator still rejects an invalid kind; the
+// tool is what normalizes before calling it.
+func TestRemember_FallsBackOnAnUnknownKind(t *testing.T) {
+	mem := newTestMemory(t)
+	write := WriteTool{Mem: mem}
 	res, err := write.Run(map[string]any{
 		"content": "x", "kind": "not-a-kind",
 	}, tools.Context{TaskID: "t"})
-	if err == nil {
-		t.Fatal("expected an error for an invalid kind")
+	if err != nil {
+		t.Fatalf("an unknown kind should not fail the task: %v", err)
 	}
-	if res.OK {
-		t.Error("OK should be false for an invalid kind")
+	if !res.OK {
+		t.Fatalf("the write did not happen: %+v", res)
+	}
+	// The artifact was stored, and it was stored as an
+	// observation.
+	out := res.Output
+	if got, _ := out["kind"].(string); got != string(memory.KindObservation) {
+		t.Errorf("kind = %q, want %q", got, memory.KindObservation)
 	}
 }
 

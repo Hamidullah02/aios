@@ -1,9 +1,7 @@
 # aios-sandbox
 
-The aios-sandbox module runs untrusted commands in a safe
-environment. The module is a small Go package at
-`internal/sandbox/` and depends only on the Go standard
-library.
+The aios-sandbox module runs untrusted commands in a contained
+environment. The module is a Go package at `internal/sandbox/`.
 
 ## Public surface
 
@@ -12,13 +10,26 @@ library.
 - `NewSubprocessRunner()` — constructor with the system clock.
 - `NewSubprocessRunnerWithClock(now)` — constructor with an
   injected clock.
+- `NewSubprocessRunnerWithNetwork(policy)` — constructor with a
+  network policy.
 - `RunOptions` — the input to `Run`.
 - `SandboxResult` — the output of `Run`.
 - `ResourceLimits` — the typed limits object.
+- `NetworkPolicy` — the network scope the runner applies.
+- `NamespacePolicy` — the Linux namespace scope the runner
+  applies.
+- `DefaultNamespacePolicy()` — the namespace policy a Linux run
+  uses.
+- `NamespacesSupported()` — whether the platform and the kernel
+  allow the namespaces.
+- `DefaultRunner()` / `SetDefaultRunner(r)` — the process-wide
+  default runner.
 - `SandboxError` — the base error type.
 - `SandboxTimeout` — the timeout error.
 - `SandboxResourceLimit` — the resource-limit error.
 - `LimitsError` — the limits-validation error.
+- `NetworkError` — the network-policy-validation error.
+- `NamespaceError` — the namespace-policy-validation error.
 - `DefaultTimeout` — the default wall-clock timeout (60s).
 
 ## Algorithm
@@ -36,14 +47,30 @@ The run algorithm is:
 
 ## Platform support
 
-- POSIX (Linux, macOS): the resource limits are applied
-  through `syscall.Setrlimit`. The CPU, memory, and
-  process limits are honored. The wall-clock timeout is
-  honored as a fallback.
-- Windows: the resource limits are a no-op. The wall-clock
-  timeout is the only bound. The runner falls back to
-  the timeout on Windows because `syscall.Setrlimit` is
-  not available there.
+- Linux: the resource limits are applied through
+  `syscall.Setrlimit` via `golang.org/x/sys/unix`. The CPU,
+  memory, and process limits are honored. The runner also puts the
+  child in its own user, network, mount, and pid namespaces when
+  the kernel allows them.
+- macOS: the resource limits are applied through
+  `syscall.Setrlimit` via `golang.org/x/sys/unix`. The CPU and
+  memory limits are honored. The process-count limit is NOT
+  honored, because macOS has no `RLIMIT_NPROC`. The child is put
+  in its own process group.
+- Windows: the resource limits are enforced by a Job Object
+  (`JOB_OBJECT_LIMIT_ACTIVE_PROCESS`,
+  `JOB_OBJECT_LIMIT_JOB_MEMORY`,
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). The wall-clock timeout
+  is the other bound. The child is created suspended and resumed
+  after the job assignment lands, so a grandchild cannot escape
+  the job.
+
+## Process-tree containment
+
+The child is put in its own process group on POSIX and its own Job
+Object on Windows. The timeout kills the whole tree, not just the
+direct child, so a command that backgrounds work does not leave
+that work running.
 
 ## Path isolation
 

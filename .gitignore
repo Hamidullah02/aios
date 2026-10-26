@@ -1,0 +1,29 @@
+# Runtime artifacts.
+#
+# The audit log and the checkpoint directory are written wherever
+# aios runs. A run from the repository root puts them in ./var,
+# which is outside aios-system/.gitignore, so they are ignored
+# here as well.
+var/
+
+# Local secrets. A .env file holds API keys, and a key that
+# reaches a commit is a key that has to be rotated.
+.env
+.env.*
+
+# Local journey and probe output directories.
+#
+# Each of these holds the captured stdout of an `aios web` run,
+# and that stdout carries the session token in the URL the server
+# prints. The server itself calls that token a credential, and a
+# future `git add .` would have swept it into a commit. The
+# directories are regenerable -- they are the working area for the
+# journey scripts -- so they are ignored rather than committed.
+approval-journey/
+browser-journey/
+hole-egress/
+hole-fix/
+hole-gitcommit/
+hole-memory/
+rina-journey/
+setup-journey/

@@ -1,5 +1,585 @@
 # Changelog
 
+## v0.55.0 — the install link pointed at a file that was not there
+
+**The documented install command could not work.** The README and
+the release notes both tell a user to run:
+
+```
+curl -fsSL https://raw.githubusercontent.com/Hamidullah02/aios/main/install.sh | sh
+irm  https://raw.githubusercontent.com/Hamidullah02/aios/main/install.ps1 | iex
+```
+
+Both installers were in `aios-system/`, one level down. The URL
+names the repository root, so the request 404s, and the operator's
+first experience of the product is a failed download with no cause
+they can see.
+
+The installers now live at the repository root, where the
+documented URL points. The release workflow also attaches them to
+the release, so the copy that matches the binaries in a given
+release is the one on the release page.
+
+**The same mistake was hiding the CI.** GitHub only reads
+workflows from `<repo-root>/.github/workflows`. Both workflow files
+were in `aios-system/.github/workflows`, so the repository had no
+CI and no release pipeline at all -- GitHub never looked there.
+They are at the root now.
+
+And the root `README.md` was an 18-byte stub (`# aios`), so the
+repository's front page showed a title and nothing else. The real
+README -- the install instructions, the model-key setup, the CLI
+reference -- is the front page now.
+
+**The workflows would also have failed on their first run.** The
+Go module lives in `aios-system/`, but every step ran `go build
+./cmd/aios` from the repository root, where there is no `go.mod`.
+Each Go step now sets `working-directory: aios-system`.
+
+**One more, found by the same check.** `install.ps1` mapped
+`ARM64` and `x86` to release assets that the workflow never
+builds -- only `windows/amd64` is built. On those machines the
+installer would have downloaded a URL that 404s. The installer now
+offers only what is built, and says so plainly on anything else.
+
+`internal/cli/first_run_test.go` already pinned the install URL
+and the asset names. It failed on the first run after the move
+and passed after -- which is the test doing its job: it caught
+the moment the files and the URLs stopped agreeing.
+
+## v0.54.0 — the approval daemon started without saying so
+
+**`aios daemon start` printed nothing.** The daemon bound its
+socket, wrote its pid file, and then blocked in the accept loop
+without a word. It is a foreground service, so the operator's
+terminal showed a command that looked hung, with no way to tell
+"it is running" from "it died before it started" -- and no way to
+know which socket path the rest of the tooling would use.
+
+It now prints one line, after the socket is bound and before the
+blocking loop:
+
+```
+aios daemon: ready on C:\Users\Home\AppData\Local\Temp\aios-approval.sock
+```
+
+The line is a promise the daemon keeps: it is printed only once
+the socket exists, so an operator who sees it can go and use
+`aios approve` straight away.
+
+`internal/cli/coverage_test.go` pins it. The test was confirmed to
+fail against the old code -- stdout was empty -- before the fix
+was kept.
+
+**This was found by driving the product, not by reading it.** The
+setup journey in `var/setup-journey.ps1` starts the daemon the way
+an operator does and reads what it printed. The setup journey also
+drove the rest of the first-run path: `aios init` in a bare
+directory, `aios init` a second time, the daemon's socket, `aios
+approve` against a live daemon, and a clean stop.
+
+## v0.53.0 — a stale browser tab was told to try again
+
+**A second click on a decided approval came back 409 instead of
+404.** The web UI's task path resolves approvals through the
+composite resolver, which tries this server's own handler first
+and falls through to the approval daemon when the local handler
+misses. The daemon's failure was returned with the approval id
+wrapped around it:
+
+```go
+return "", fmt.Errorf("approval %s: %w", id, err)
+```
+
+That wrapping kept the daemon's message but dropped the
+`webui.ErrApprovalNotFound` sentinel. The server tells "this
+approval is not here" (404, a stale tab) from "this approval
+cannot be granted here" (409, a configuration the operator has to
+change) by testing the error against that sentinel -- so with the
+sentinel gone, the answer was always 409.
+
+409 is the wrong answer for a stale tab. It tells the operator the
+request was well-formed but the state was wrong, which reads as
+"try again" for an approval that is never coming back. The CHANGELOG
+for v0.43.0 claimed this returned 404, and it did -- but only for
+the `run --web` path, where the run's own handler is the resolver
+and there is no daemon to fall through to. The claim was verified
+on one path and generalised to another.
+
+The error now keeps both: the daemon's own message says what went
+wrong, and the sentinel says what kind of failure it is.
+
+`internal/cli/web_tasks_test.go` pins it. The test was confirmed to
+fail against the old code before the fix was kept.
+
+**This was found by driving the product, not by reading it.** The
+approval journey in `var/approval-journey.ps1` asks the question a
+real operator's browser asks -- what happens when I click Allow
+twice -- and the answer was wrong.
+
+**Also: the journey output directories were about to be committed.**
+Each one holds the captured stdout of an `aios web` run, and that
+stdout carries the session token in the URL the server prints. The
+server calls that token a credential. The repository's root
+`.gitignore` did not cover those directories, so a `git add .` would
+have put four live tokens and four copies of the `.env` file -- the
+one holding the model API key -- into a commit. The directories are
+the working area for the journey scripts and are regenerable, so
+they are now ignored.
+
+## v0.52.0 — the sandbox's liveness probe could not tell a dead process from a live one
+
+**On Windows, the probe that checks whether a process is still
+running was wrong.** `internal/sandbox/probe_windows.go` opened
+the process with `OpenProcess(SYNCHRONIZE)` and reported "alive"
+when the open succeeded. A successful open does not mean the
+process is alive: a terminated process keeps its process object
+alive for as long as any handle to it is open, and the open
+succeeds for it. The correct check is to wait on the handle with a
+zero timeout -- an exited process is already signalled, a running
+one times out.
+
+This was not a cosmetic bug. It sat in the test that guards the
+process-containment property: `TestProcessTreeKill_GrandchildDoesNotSurvive`
+asks whether a grandchild outlived the timeout, and it asks by
+probing the grandchild's pid. With the broken probe, a grandchild
+that had been correctly killed was reported as alive -- so the test
+that verifies the kill failed intermittently, for a reason that had
+nothing to do with the kill.
+
+The runner holds the child's own handle, which is exactly the
+condition that keeps a dead process's object alive. The probe now
+waits on the handle rather than stopping at the open.
+
+`internal/sandbox/probe_windows_test.go` pins both directions: a
+terminated process must be reported as dead, and a live one as
+alive. The first of those two tests was confirmed to fail against
+the old probe before the fix was kept.
+
+The POSIX path is unaffected: there, an orphaned grandchild is
+re-parented to init and reaped promptly, so `kill(pid, 0)` stops
+reporting it as soon as it dies.
+
+## v0.51.0 — the CI that was missing, and the race detector in it
+
+**There was no CI.** The only workflow in this repository was
+`release.yml`, and it ran on tags. A change could sit on a branch
+indefinitely with nothing checking it; the release job was the
+first thing that ever ran the test suite, and it ran on the
+release machine, at release time.
+
+That is how the two data races fixed in v0.47.0 survived. The
+plain suite passed -- they were races, and races are invisible to
+a suite that does not look for them -- and the one tool that
+would have found them was never in the loop.
+
+`.github/workflows/ci.yml` now runs on every push to `main` and
+every pull request, with three jobs:
+
+- **test** -- vet and the plain suite, `CGO_ENABLED=0`, matching
+  how the binaries are actually built.
+- **race** -- `go test -race ./...`, with `CGO_ENABLED=1`.
+- **cross-compile** -- builds and vets every target the release
+  workflow ships: linux and darwin on amd64 and arm64, and
+  windows on amd64.
+
+The cross-compile job exists because a build tag that excludes a
+platform does not fail the host build. v0.46.0 shipped a release
+that did not compile on Linux at all, and the only reason it was
+caught is that someone tried to install it.
+
+**The race detector is in the release workflow too.** A tag can be
+pushed without a pull request ever being opened, so the release
+job now runs `go test -race ./...` as well. The shipped binaries
+stay `CGO_ENABLED=0` -- they have to run on a machine with no C
+toolchain -- but the same source is checked with cgo enabled
+before it is packaged. Testing and packaging are separate
+concerns and they no longer share one job.
+
+## v0.50.0 — every tool the agent has is now a tool it can use
+
+**Twenty of the twenty-three tools were unreachable.**
+The bus registered the full doc-set tool set — `edit`,
+`apply_patch`, `multi_edit`, `notebook_edit`, `git_status`,
+`git_diff`, `git_log`, `git_commit`, `git_branch`, `git_worktree`,
+`grep`, `glob`, `code_search`, `diagnostics`, `read_image`,
+`memory`, `memory_write`, and more. The planner carried a
+hand-written table of five. A tool the planner did not know
+about could not be named in a plan, so it was dead code however
+well it worked — and `aios tools` listed it as though it were
+reachable.
+
+The gap was structural. The planner's table was a separate copy
+of the bus's tool map, and the comment above it said the two
+were "deliberately kept in sync by hand". They were not. The
+table said it mirrored the bus; it did not.
+
+**Tools now describe themselves.** `tools.Describer` is an
+optional interface: a tool returns its own description and its
+own JSON input schema. The schema lives in the same file as the
+`Run` method that reads the arguments, so the text the model
+reads and the code that consumes the arguments cannot drift
+apart. `tools.RiskTier` does the same for the risk tier.
+
+**The planner's tool list is derived from the bus.** There is
+one list now, not two. `plannerToolSpecs` reads the bus's live
+tool map and projects it into the shape the planner speaks. A
+tool added to the bus is offered to the model automatically; a
+tool removed from the bus disappears from the prompt.
+
+**`self_check` was dispatchable but not plannable.** The tool
+was registered after the planner was built, so it was in the bus
+and not in the prompt: the model could never choose it. It is
+now registered before the tool list is read.
+
+**Two new schemas, one caught in the act.** The `ask_user`
+schema shipped with an extra brace and was not valid JSON. The
+new test that checks every schema parses found it on the first
+run. A malformed schema makes the model guess, and a guess that
+happens to be wrong produces a plan that fails at the tool call
+with no hint that the tool's own documentation was broken.
+
+**Verified against the live model.** Two goals that could not
+have been planned before: "check the git status of the
+repository" planned a `git_status` task and ran it; "change the
+word hello in greeting.txt to goodbye" planned an `edit` task
+with `path=`, `old_string=`, and `new_string=` inputs and
+rewrote the file. Both exited 0 with a `tool_call` audit row
+behind them.
+
+## v0.49.0 — the product can be got, and it works out of the box
+
+**A non-coder could not get the product, and could not run it.**
+The system had a browser UI and a CLI, but no way to obtain either:
+no installer, no download, no release workflow. Worse, the thing
+did not work when you did have it. There was no model adapter for
+OpenRouter, nothing in the codebase read a `.env` file, and the
+planner's prompt never told the model the format the runtime
+actually accepts for a tool's arguments. A first run produced a
+plan whose tasks died at the first tool call with `path is
+required`.
+
+**OpenRouter is now a provider.** `internal/models/openrouter.go`
+adds the adapter: the OpenAI wire format against OpenRouter's
+endpoint, with the attribution headers OpenRouter asks for. It
+reads `OPENROUTER_API_KEY`, and also `openrouterapi`, because that
+is how operator files spell it.
+
+**The default model is free.** `nvidia/nemotron-3-ultra-550b-a55b:free`
+is the default. A first run must not cost money, and a retry loop
+against a model that keeps failing its verifier is exactly the
+case where an unexpected bill is the worst outcome. The default is
+also good at the one thing the planner asks of it: emitting a JSON
+object and nothing else.
+
+**The `.env` file is read.** `internal/cli/dotenv.go` loads it on
+startup, searching from the config file's directory and from the
+working directory, upwards. A key exported in the shell wins over
+the file, so an operator can override it for one command. An
+empty variable does not count as set: an empty key is not a key.
+`AIOS_NO_DOTENV` turns the loader off.
+
+**Four bugs, all of them mine to own.** The price table's empty
+check probed with a sentinel model that no table prices, so it
+answered "empty" for every table -- `buildRouter` has always
+discarded the operator's `prices.yaml` and replaced it with the
+built-in list. The planner prompt said `"inputs" (array of
+strings)` and never said `key=value`, which is what the worker
+splits on; the shipped `examples/plan.json` had the same shape and
+so could never have run. The verifier now rejects an input that
+is not `key=value`, so the repair loop fixes it instead of the
+run dying at the tool call.
+
+**The `--model` flag was dead.** It was parsed, documented, and
+then never read. It works now, and so does `AIOS_MODEL`.
+
+**There is something to download.** `install.sh` and
+`install.ps1` fetch a prebuilt binary for the operator's machine,
+check that it runs, and put it on the PATH. The release workflow
+builds the five assets those scripts ask for. The binaries are
+`CGO_ENABLED=0` and self-contained.
+
+**The card names the right key.** The web UI's missing-key message
+used to say `Set OPENAI_API_KEY (or ANTHROPIC_API_KEY)`, which
+sends an OpenRouter operator down a path that does not help. It
+now names the variable the provider actually asked for.
+
+## v0.48.0 — the browser can start work
+
+**A non-coder could watch the system work but not ask it to.**
+The web UI had a communication log, an agent grid, an approval
+queue, and an activity feed. What it did not have was a way to
+give the product something to do. `POST /api/messages` accepted a
+message, wrote it to the log, and stopped: the bridge's own comment
+said it -- "nothing in the runtime consumes a message". A message
+from an agent is a note between agents, so nothing consumed
+those either. The only way to start work was `aios fix
+<objective>` in a terminal, which means the entry point required a
+terminal, an objective written the way the planner expects, and
+knowledge of a product whose vocabulary ("plan", "policy.yaml",
+"socket") was never written for the person holding the mouse.
+
+**The task entry point.** The page now opens with one field: what
+do you want done? One sentence, one button. The server decides
+whether that sentence becomes a plan as written, a repaired plan,
+or a plan the conversation refined -- the operator is never asked
+to approve a plan, because a plan is not a thing they can judge.
+
+`POST /api/tasks` takes `{"goal": "..."}` and starts the work.
+`POST /api/messages` does the same when the message is from the
+operator (`"from":"operator"`) and returns the id of the task the
+message became. A message from an agent still starts nothing:
+turning agent chatter into a queue of accidental runs would be
+worse than the old silence.
+
+**The seam.** `internal/webui` defines `TaskSubmitter` -- an
+interface with `Submit(goal)` and `CanSubmit()`. `internal/cli`
+implements it (`WebTaskSubmitter`): it calls the planner, runs the
+plan through the same `runWithApprovals` loop `aios run` uses,
+and publishes progress to the hub as the run happens. The
+dependency runs that way on purpose -- the UI must not know about
+the planner, the model router, or the orchestrator, and those must
+not know about HTTP.
+
+**The conversation is the context.** The planner is handed the
+operator's own earlier messages alongside the goal. "Summarise it"
+is not a goal on its own; it is a goal after the operator said
+which file. The goal itself is left out of that context, because
+the goal is already the prompt's goal and repeating it makes the
+model read it twice. Agent chatter is left out too: it is
+machinery talking to itself, and it would only add noise.
+
+**Honest refusals.** A server without a planner still serves and
+still shows past activity, but it says so -- `this server cannot
+start tasks; it can only watch runs that are already going` --
+instead of accepting a goal and dropping it. The UI reads
+`can_submit_tasks` from the snapshot and replaces the composer with
+that explanation rather than offering a Start button that cannot
+work. A blank goal is refused with "say what you want done"
+rather than sent to the planner, which would answer with a
+confusing "plan generation failed".
+
+**Failures land in words.** A missing API key is the common case by
+far, so the task card says "no AI model key is configured, so
+nothing can be planned. Set OPENAI_API_KEY (or ANTHROPIC_API_KEY)
+and try again" rather than "OPENAI_API_KEY is not set". A failed
+task always reaches a terminal state with a detail and a finish
+time: a card stuck on "planning" is the worst outcome, because the
+operator has no idea whether anything is happening.
+
+**One run at a time.** The orchestrator is sequential by design
+and the agent panels are keyed by task id, so two plans in flight
+would put two plans' steps in one set of panels. A second
+submission is refused in words -- "a task is already running; wait
+for it to finish" -- rather than interleaved.
+
+### The race detector found a real race in the audit handle
+
+`go test -race ./...` failed on the first run of this version, and
+the failure was in the code this version added: a task submitted
+from the browser runs in its own goroutine, and the process closes
+the audit log on the way out. `audit.Log.Close` set the database
+pointer to nil while the run's tracer was reading it, and the read
+of the pointer and the write of the pointer were two operations on
+the same word with no lock between them.
+
+The fix is a second lock on the handle itself. `Close` takes the
+handle's write lock, so it waits for an operation that is already
+in flight; every operation takes the read lock for the whole
+operation, so "the database is still there" and "the database is
+still usable" are the same statement. The write mutex still
+serialises writes, because the chain hash of a row is computed
+from the previous row's hash.
+
+The visible symptom before the fix was not a crash: a run whose
+audit rows were written while the log was closing would find
+those rows failing with "sql: database is closed" halfway
+through, which is an audit trail with holes in it.
+
+### Verification
+
+Driven end to end against a real server, not a mock: `aios web`
+serving the built binary, the composer present in the served
+HTML, `POST /api/messages` with `"from":"operator"` returning
+`task_id`, the task appearing in `GET /api/tasks` and in the SSE
+snapshot, and the plan id rewritten to the task id so two
+submissions cannot fight over one checkpoint file.
+
+`go test ./...`, `go vet ./...` and `go test -race ./...` all pass
+across all 32 packages, zero data races.
+
+## v0.47.0 — the race detector found two real races, and it can now be run
+
+**The race detector runs now, and it found two real data races
+immediately.** A previous version of this file claimed the
+Windows toolchain had no C compiler, so `-race` could not be
+run and concurrency was covered by hand-written tests instead.
+That was wrong: `C:\msys64\ucrt64\bin\gcc.exe` is present. With
+`CGO_ENABLED=1`, `CC` pointing at it and its directory on `PATH`,
+`go test -race ./...` runs across all 32 packages.
+
+It failed on the first run, in two places.
+
+**The egress proxy published its server unsynchronised.**
+`internal/egress/proxy.go` held the running `*http.Server` in a
+plain field. `Listen` assigned it; `Addr` and `Shutdown` read it
+from other goroutines. The race detector flagged every proxy test
+that started a server and then asked for its address -- 17 tests
+across `internal/egress`, all of them real.
+
+This was not a test artefact. The production path is the same
+shape: `internal/cli/egress_guard.go` calls `proxy.Listen()` on
+the setup goroutine and `guard.Close()` calls `proxy.Shutdown()`
+from whichever goroutine tears the run down. A `Shutdown` that
+lands while `Listen` is still assigning could observe a
+half-initialised server and shut down the wrong thing -- or none.
+The field is now guarded by an `sync.RWMutex`, with `serverRef`
+and `setServer` as the only ways to reach it.
+
+**The approval handler wrote to the terminal from two goroutines.**
+`internal/cli/approval_ui.go` wrote its prompt and its decision
+note to `h.Out` with bare `fmt.Fprintf`. The resolver is called
+from an HTTP goroutine and the run calls `Approve` from its own,
+so two writes could land at once. On a `bytes.Buffer` that
+corrupts the buffer; on a terminal it shows two half-lines.
+Writes now go through `write`, which holds `outMu` for the whole
+block, so one approval's prompt reads as one prompt rather than
+interleaving with another's.
+
+The two tests that exposed it were reading a `bytes.Buffer` while
+the handler wrote to it. That read was itself the race, so the
+tests now use a `syncBuffer` with the same one-mutex shape.
+
+**The daemon-start test had a 2-second timeout that the race
+detector could outrun.** `TestDaemonResolver_Resolve` failed once
+during the full-suite run with "daemon socket never appeared". The
+daemon was not slow to start: the test gave up. The timeout is
+now 10 seconds, and the helper captures the daemon's bind error
+instead of discarding it, so a daemon that fails to start says
+so rather than looking like a slow one.
+
+The claim in `approval_ui_concurrency_test.go` that the race
+detector was unavailable on this toolchain has been corrected --
+it was available, and it was never run.
+
+`go test -race ./...` now passes: 32 packages, zero data races.
+`go vet ./...` and `go test ./...` pass.
+
+## v0.46.0 — the sandbox is a sandbox now, and the project builds on Linux
+
+Two things landed together, because the first one was impossible
+without the second.
+
+**The project did not compile on Linux or macOS.** Before this
+version, `internal/sandbox/limits_posix.go` carried the build tag
+`unix || darwin || linux` and referenced `syscall.RLIMIT_NPROC`.
+Go's `syscall` package defines `RLIMIT_NPROC` on neither Linux nor
+macOS -- it is an `x/sys/unix` constant. So `go build` failed on
+every POSIX target:
+
+```
+internal/sandbox/limits_posix.go:42:34: undefined: syscall.RLIMIT_NPROC
+```
+
+The `unix` tag is not a Go build constraint at all -- `unix` is
+never true -- so the file only compiled on darwin and linux, and
+failed on both. **The Linux and macOS builds have been broken
+since the file was written.** The Windows build was the only one
+that worked, which is why the bug was invisible: the project was
+being tested on the one platform where it compiled.
+
+The fix splits the file per platform and moves to `x/sys/unix`,
+which is the package that actually defines the constants:
+`limits_linux.go` (`linux`), `limits_darwin.go` (`darwin`). The
+macOS variant does not honor `ResourceLimits.Processes`, because
+the kernel has no `RLIMIT_NPROC` there. That is now stated in the
+code rather than implied by a build tag.
+
+`golang.org/x/sys` moves from an indirect dependency to a direct
+one. It was already in the module graph.
+
+**Now the sandbox is a sandbox.** The review's blocker #1 said the
+sandbox is `os/exec` plus rlimits: no namespace, no container, no
+seccomp, no filesystem jail. That was accurate. Three pieces of
+real isolation now exist.
+
+*The process tree dies with the timeout.* Before this version the
+runner killed the direct child on timeout and nothing else. A
+command that backgrounded work -- `npm run dev &`, a shell that
+spawns a compiler -- left the grandchildren running with the
+parent's privileges, and the audit log said the run had timed out
+while the work was still going. `internal/sandbox/isolation_posix.go`
+puts the child in its own process group
+(`Setpgid: true, Pgid: 0`) and kills the group, not just the
+child. `internal/sandbox/isolation_windows.go` does the same with
+a Job Object, which is strictly better: the kernel tracks job
+membership, so a descendant cannot escape by changing its parent.
+
+The runner's `Cmd.Cancel` hook is replaced, because the default
+only kills the direct child.
+
+*The Windows Job Object enforces the limits the kernel can.* The
+Job Object applies `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` for the
+process count and `JOB_OBJECT_LIMIT_JOB_MEMORY` for memory, and
+sets `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` so closing the handle
+terminates every process in the job. The child is created with
+`CREATE_SUSPENDED` and resumed with `NtResumeProcess` after the
+job assignment lands, because a child that spawns a grandchild
+between `CreateProcess` returning and the assignment would produce
+a grandchild outside the job -- one that survives the timeout.
+Go's `exec` package does not expose the primary thread handle, so
+`NtResumeProcess` (which takes a process handle) is used instead of
+`ResumeThread`.
+
+*Linux gets real namespaces.* `internal/sandbox/namespaces_linux.go`
+puts the child in a user, network, mount and pid namespace. The
+user namespace maps the child's uid 0 onto the operator's own
+unprivileged uid, so a child that finds a setuid binary or a
+kernel bug is confined to the identity the operator granted. The
+network namespace gives the child an empty network stack -- no
+interface except loopback -- which is what makes the egress proxy
+the only way out. The mount namespace gives the child its own
+filesystem view. The pid namespace makes the child pid 1, so the
+kernel reaps its orphans.
+
+The namespaces degrade rather than fail. A kernel without user
+namespaces, a container that forbids `CLONE_NEWUSER` and a
+hardened CI runner all reject them. `--isolation=auto` (the
+default) probes once and falls back to the weaker containment,
+because a run that cannot start is a worse answer than a run that
+starts with less isolation. `--isolation=namespaces` requires them
+and fails without them. `--isolation=none` disables them.
+
+**What this still does not do.** It is still not a chroot, and it
+does not give the child a restricted filesystem view of its own:
+the mount namespace isolates the child's mounts from the host's,
+but the child can still read the whole filesystem it has
+permission to read. There is no seccomp filter, no LSM policy, and
+no cgroup memory cap on Linux. The Windows path is stronger --
+the Job Object is a real kernel-enforced boundary -- and the
+Linux path is weaker than a container.
+
+The honest summary is now: *a gated child runs as an
+unprivileged identity, in its own network namespace, in a process
+group or Job Object that dies with the run, and can only reach
+the hosts on the allow list.* That is a real boundary. It is not
+the same as a container, and the `sandbox` package doc says so.
+
+**Tests.** `internal/sandbox/isolation_test.go` proves the tree
+kill with a real grandchild: the child spawns a grandchild that
+would outlive it, the run is timed out, and the test checks that
+the grandchild is gone. The test was verified to have teeth -- with
+the Job Object kill removed it fails, reporting the surviving
+grandchild's pid.
+
+`internal/sandbox/limits_linux_test.go` covers the
+`RLIMIT_NPROC` branch that no test could reach before, because the
+package did not compile on Linux.
+
+**Cross-compilation is now a checked property.** `go build` and
+`go vet` pass for `linux/amd64`, `darwin/amd64` and
+`windows/amd64`. Before this version, two of the three failed.
+
 ## v0.45.0 — the child process can no longer reach the network behind your back
 
 The pitch for this project is "security enforced by the environment,
@@ -176,6 +756,38 @@ cookie paths, the handshake and its redirect, a foreign Host
 refused, a cross-origin mutation refused, a same-origin mutation
 allowed, and the security headers present.
 
+**What this does not fix.** The token closes the network
+boundary, not the sandbox. An approved `run_shell` call still
+executes with the operator's own privileges. The token stops a
+stranger on the network from *granting* that command. It does
+not make the command itself safe, and the containment in force
+is partial:
+
+- Windows uses a Job Object for the process-count and memory
+  limits and for killing the tree on timeout. It is not a jail:
+  the child is not a different user, cannot write to a
+  restricted filesystem, and is not denied the network except
+  through the egress proxy. The user/network/mount/pid
+  namespaces are a Linux feature and are unavailable here.
+- Egress enforcement is new in v0.44.0 and is covered by
+  `internal/cli/egress_enforcement_test.go`, but a tool that
+  ignores the proxy environment is not yet stopped.
+
+An approval gate that authorizes a partly-contained command is
+a gate on *consent*, not on *consequence*. That is a coherent
+design -- the operator is the one deciding -- but it is not
+the same as the command being contained, and the UI should
+not imply otherwise.
+
+**Requirements.** The session boundary now has named
+requirements in `docs/modules/aios-cli/SRS.md`:
+REQ-CLI-WEB-001 through REQ-CLI-WEB-008 cover the loopback
+default, the mandatory token, its randomness and pinning, the
+cookie's attributes and the one-time URL handshake, the Host
+check, the Origin check, the hardening headers, and the JSON
+error body on a refusal. REQ-CLI-RUN-011 covers `run --web`.
+The PRD no longer lists the web interface as out of scope.
+
 ## v0.43.0 — approve from the browser
 
 v0.42.0 made approvals resolvable at a terminal. The web UI
@@ -257,7 +869,18 @@ path exits 1 with `operator denied`; a second click returns
 404; a run with nobody in the browser stops rather than
 granting.
 
-`go test -race` could not run: it needs cgo and there is no C
+> **The 404 was not actually happening, and v0.53.0 fixes it.**
+> This was verified against `run --web`, where the run's own
+> handler is the resolver. The web UI's own task path uses the
+> composite resolver, which falls through to the approval daemon
+> when the local handler misses -- and the daemon's socket error
+> was returned with the approval id wrapped around it, which
+> dropped the `ErrApprovalNotFound` sentinel. The server tells
+> "not here" (404) from "cannot be granted here" (409) by
+> testing that sentinel, so the web path answered 409 to a stale
+> tab. See v0.53.0.
+
+`go test -race` could not run when this was written: it needs cgo and there is no C
 compiler on this machine (`gcc` not found). The concurrent
 path is instead covered by a stress test that drives eight
 simultaneous approvals while four goroutines hammer the hub,
@@ -265,6 +888,14 @@ which fails loudly under the runtime's own map guard if the
 locking is wrong. That is weaker than the race detector and is
 called out as such — run `-race` on a machine with a C
 compiler before trusting this area.
+
+> **Superseded by v0.47.0.** A C compiler was available after all
+> (`C:\msys64\ucrt64\bin\gcc.exe`), and the race detector found
+> two real data races in this area — in the egress proxy and in
+> this handler's output writes. Both are fixed, and
+> `go test -race ./...` now passes. The stress test is kept: it
+> asserts the queue drains, which the race detector does not.
+
 ## v0.42.0 — approvals a human can actually answer
 
 The default policy gates `run_shell` with `ask`, and the

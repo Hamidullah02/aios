@@ -104,11 +104,42 @@ func (r ReadTool) Run(args map[string]any, ctx tools.Context) (tools.Result, err
 	}
 }
 
+// validKinds drops the kinds the memory does not know.
+//
+// A filter naming an unknown kind makes the whole query fail:
+// Query.Validate rejects it and the tool answers "kind must be
+// one of task, file, decision, observation, tool_result,
+// model_output". A search that asks for one bad kind among
+// several should still find the artifacts it named correctly.
+//
+// A filter that ends up empty means "no kind filter", which is
+// what the caller meant.
+func validKinds(kinds []string) []string {
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		if memory.ArtifactKind(k).IsValid() {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// validScopes drops the scopes the memory does not know.
+func validScopes(scopes []string) []string {
+	out := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		if memory.Scope(s).IsValid() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // search runs a Query against all three scopes.
 func (r ReadTool) search(args map[string]any) (tools.Result, error) {
 	q := memory.Query{
-		Kinds:    splitList(args, "kinds"),
-		Scopes:   splitList(args, "scopes"),
+		Kinds:    validKinds(splitList(args, "kinds")),
+		Scopes:   validScopes(splitList(args, "scopes")),
 		Tags:     splitList(args, "tags"),
 		Pattern:  stringArg(args, "pattern"),
 		Since:    stringArg(args, "since"),

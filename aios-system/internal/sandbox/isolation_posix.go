@@ -22,6 +22,17 @@ func startJobObject(limits *ResourceLimits) (*jobObject, error) {
 	return nil, nil
 }
 
+// prepareJobAssignment is a no-op on POSIX: there is no Job
+// Object to assign the child to, so the child does not need to
+// be created suspended.
+func prepareJobAssignment(cmd *exec.Cmd) {}
+
+// resumeAfterAssignment is a no-op on POSIX: the child was never
+// suspended.
+func resumeAfterAssignment(cmd *exec.Cmd) error {
+	return nil
+}
+
 // configureProcessGroup puts the child in its own process
 // group.
 //
@@ -73,3 +84,12 @@ func killProcessTree(cmd *exec.Cmd, job *jobObject) {
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	_ = cmd.Process.Kill()
 }
+
+// assignProcess is a no-op on POSIX: the process group is the
+// containment mechanism, and the child joins it at exec time.
+func (j *jobObject) assignProcess(cmd *exec.Cmd) error {
+	return nil
+}
+
+// close is a no-op on POSIX: there is no job handle to release.
+func (j *jobObject) close() {}

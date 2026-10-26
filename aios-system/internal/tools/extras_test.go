@@ -357,6 +357,97 @@ func TestRunShell_NoRunner_UsesDefault(t *testing.T) {
 	}
 }
 
+// TestRunShell_CommandAsString pins that a plan can express a
+// command as a plain string.
+//
+// The plan format is a list of `key=value` strings, so
+// `command=ls -la` is the natural way for a model to write a
+// command, and it is the only way to write one that has not
+// been JSON-encoded. The tool accepted only []string, so that
+// plan failed with "command is required (argv)" -- an error
+// that named neither the problem nor the way out of it.
+func TestRunShell_CommandAsString(t *testing.T) {
+	var got []string
+	r := RunShellTool{Runner: &recordingRunner{onRun: func(opts sandbox.RunOptions) {
+		got = opts.Command
+	}}}
+	res, err := r.Run(map[string]any{"command": "ls -la"}, Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("OK = false: %s", res.Summary)
+	}
+	want := []string{"ls", "-la"}
+	if len(got) != len(want) {
+		t.Fatalf("command = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("command = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestRunShell_CommandAsAnySlice pins that a command that came
+// from a JSON decode works.
+//
+// A []any is what encoding/json produces for an array, so a
+// plan whose inputs are decoded from JSON hands the tool a
+// []any, not a []string.
+func TestRunShell_CommandAsAnySlice(t *testing.T) {
+	var got []string
+	r := RunShellTool{Runner: &recordingRunner{onRun: func(opts sandbox.RunOptions) {
+		got = opts.Command
+	}}}
+	res, err := r.Run(map[string]any{"command": []any{"ls", "-la"}}, Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("OK = false: %s", res.Summary)
+	}
+	if len(got) != 2 || got[0] != "ls" || got[1] != "-la" {
+		t.Fatalf("command = %v, want [ls -la]", got)
+	}
+}
+
+// TestRunShell_CommandAsJSONArrayString pins that a plan can
+// write a command as a JSON array in one string.
+//
+// The plan format is a list of `key=value` strings, so a plan
+// writes `command=["ls", "-la"]` to pass a list. Splitting that
+// on whitespace would tear it into `["ls",` and `-la"]` at the
+// space after the comma, and the runner would try to execute a
+// program called `["ls",`.
+func TestRunShell_CommandAsJSONArrayString(t *testing.T) {
+	var got []string
+	r := RunShellTool{Runner: &recordingRunner{onRun: func(opts sandbox.RunOptions) {
+		got = opts.Command
+	}}}
+	res, err := r.Run(map[string]any{"command": `["ls", "-la"]`}, Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("OK = false: %s", res.Summary)
+	}
+	if len(got) != 2 || got[0] != "ls" || got[1] != "-la" {
+		t.Fatalf("command = %v, want [ls -la]", got)
+	}
+}
+
+// TestRunShell_NoCommandAtAll pins that a plan with no command
+// at all is still an error.
+func TestRunShell_NoCommandAtAll(t *testing.T) {
+	r := RunShellTool{Runner: &recordingRunner{onRun: func(opts sandbox.RunOptions) {
+		t.Error("the runner must not be called")
+	}}}
+	if _, err := r.Run(map[string]any{}, Context{}); err == nil {
+		t.Fatal("expected an error for a missing command")
+	}
+}
+
 func TestRunShell_EnvMapStringAny(t *testing.T) {
 	// The "env" arg should accept map[string]any (YAML
 	// unmarshals into that).

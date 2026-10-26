@@ -105,6 +105,15 @@ a transcript shows that no human decided.
 reached, the subcommand shall report an actionable error
 naming the approval and the ways to resolve it.
 
+**REQ-CLI-RUN-011** The `--web` flag shall serve the
+operator UI from the running process, so the panels
+update while the plan runs rather than showing only the
+audit log's history. The subcommand shall print a link
+that carries the session token. A UI that cannot bind
+shall not fail the plan: the plan is the point and the
+UI is a convenience, so the subcommand shall continue
+without the UI and say why.
+
 ### 5.3 Resume Subcommand
 
 **REQ-CLI-RSM-001** The `resume` subcommand shall
@@ -182,7 +191,80 @@ default policy file. The subcommand shall create
 the default egress file. The subcommand shall
 create the default price file.
 
-### 5.10 Error Display
+### 5.10 Web Subcommand
+
+**REQ-CLI-WEB-001** The `web` subcommand shall serve
+the operator UI over HTTP. The subcommand shall bind
+the loopback interface by default.
+
+**REQ-CLI-WEB-002** The operator UI shall require a
+session token on every request, including the static
+assets. There shall be no configuration that serves the
+UI without one. The UI can approve a gated tool call,
+so an unauthenticated request is a capability handed
+to a stranger, not a nuisance.
+
+**REQ-CLI-WEB-003** The session token shall be minted
+per process with at least 256 bits of randomness. An
+operator shall be able to pin the token through the
+environment or the configuration.
+
+**REQ-CLI-WEB-004** A browser shall authenticate with a
+cookie that is `HttpOnly` and `SameSite=Lax`. The token
+shall travel in a URL exactly once, when the operator
+opens the link the command printed; the server shall
+exchange it for a cookie and redirect to a URL that
+carries no token.
+
+**REQ-CLI-WEB-005** The server shall refuse a request
+whose `Host` header names a host it does not answer to.
+This is the DNS-rebinding defence: a rebound name
+resolves to the loopback address, so the browser
+connects to the server while sending a foreign `Host`.
+
+**REQ-CLI-WEB-006** The server shall refuse a
+state-changing request whose `Origin` header is not the
+server's own origin. The cookie alone is not enough: a
+browser that holds the cookie attaches it to requests
+the page makes.
+
+**REQ-CLI-WEB-007** Every response shall carry a
+`Content-Security-Policy` that does not allow inline
+script, along with `X-Content-Type-Options`,
+`X-Frame-Options`, and `Referrer-Policy`.
+
+**REQ-CLI-WEB-008** A request that fails the session
+check shall be refused with a JSON error body, never
+with the HTML shell. An HTML body would let a caller
+mistake a refusal for a successful response.
+
+**REQ-CLI-WEB-009** The operator UI shall provide a task
+entry point that accepts one plain-language goal and
+starts work. The endpoint shall be `POST /api/tasks`
+with a single `goal` field. The goal shall become a
+plan, the plan shall run, and the operator shall follow
+it through the live feed. The operator shall not have
+to write a plan, a policy, or a configuration file to
+give the product something to do.
+
+**REQ-CLI-WEB-010** `POST /api/messages` shall start a
+plan when the message is from the operator. A message
+from the operator is a request for work; a message from
+an agent is a note between agents and shall start
+nothing. The response shall carry the id of the task
+the message became.
+
+**REQ-CLI-WEB-011** The planner shall receive the
+conversation that produced the goal, alongside the goal
+itself. A goal that refers to earlier context ("summarise
+it") cannot be planned from the goal alone.
+
+**REQ-CLI-WEB-012** A server that cannot start tasks
+shall say so in the response, not accept the request and
+leave the operator waiting. The UI shall disable the
+entry point and name the limitation.
+
+### 5.11 Error Display
 
 **REQ-CLI-ERR-001** The CLI shall print a clear
 error message when an error occurs. The message

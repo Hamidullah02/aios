@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sadi/aios-system/internal/sandbox"
 )
@@ -28,11 +30,8 @@ type RunShellTool struct {
 func (RunShellTool) Name() string { return "run_shell" }
 
 func (r RunShellTool) Run(args map[string]any, ctx Context) (Result, error) {
-	cmd, _ := args["command"].([]string)
+	cmd := resolveCommandArg(args["command"])
 	if len(cmd) == 0 {
-		// Allow the caller to pass a single string for
-		// "command" and split it themselves. The doc set
-		// says argv, so this is a strict check.
 		return Result{OK: false, Summary: "missing command"}, fmt.Errorf("tools: run_shell: command is required (argv)")
 	}
 	timeout, _ := toInt(args["timeout"])
@@ -84,4 +83,66 @@ func (r RunShellTool) Run(args map[string]any, ctx Context) (Result, error) {
 		},
 		Summary: fmt.Sprintf("exit %d in %dms", res.ExitCode, res.DurationMs),
 	}, nil
+}
+
+// resolveCommandArg turns the `command` argument into an argv.
+//
+// It accepts four shapes, because a plan can express a command
+// in whichever of them is most natural:
+//
+//   - a []string, which is the canonical form the schema
+//     describes;
+//   - a []any of strings, which is what a JSON decode produces;
+//   - a JSON array written as a string, which is what a plan
+//     produces when it writes `command=["ls", "-la"]`;
+//   - a plain string, which is what the plan's `key=value`
+//     input format gives, because a value cannot carry a list.
+//
+// The string forms matter more than they look. The plan format
+// is a list of `key=value` strings, so a plan cannot express a
+// list value without encoding it in the string. The tool
+// accepted only []string and rejected the string, so a plan
+// saying `command=ls -la` failed with "command is required
+// (argv)" -- an error that named neither the real problem nor
+// the way out of it.
+//
+// A JSON array is decoded, not split on whitespace. Splitting
+// would tear `["ls", "-la"]` into two fragments at the space
+// after the comma and try to run a program called `["ls",`.
+func resolveCommandArg(raw any) []string {
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		return splitCommandString(v)
+	default:
+		return nil
+	}
+}
+
+// splitCommandString turns a string into an argv.
+//
+// A string that is a JSON array is decoded: that is how a plan
+// writes a command whose arguments need quoting or spaces. Any
+// other string is split on whitespace, which is enough for the
+// ordinary case and is deliberately not a shell parse -- no
+// quoting, no pipes, no redirection -- because the runner takes
+// an argv and never goes through a shell.
+func splitCommandString(s string) []string {
+	trimmed := strings.TrimSpace(s)
+	if strings.HasPrefix(trimmed, "[") {
+		var list []string
+		if err := json.Unmarshal([]byte(trimmed), &list); err == nil && len(list) > 0 {
+			return list
+		}
+	}
+	return strings.Fields(s)
 }

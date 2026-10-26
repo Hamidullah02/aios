@@ -116,6 +116,8 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/state", s.handleState)
 	s.mux.HandleFunc("GET /api/events", s.handleEvents)
 	s.mux.HandleFunc("POST /api/messages", s.handlePostMessage)
+	s.mux.HandleFunc("POST /api/tasks", s.handlePostTask)
+	s.mux.HandleFunc("GET /api/tasks", s.handleGetTasks)
 	s.mux.HandleFunc("GET /api/layout", s.handleGetLayout)
 	s.mux.HandleFunc("PUT /api/layout", s.handlePutLayout)
 	s.mux.HandleFunc("POST /api/agents/{id}/status", s.handleAgentStatus)
@@ -290,6 +292,7 @@ var knownAPI = apiRoutes{
 	"/api/state":              {"GET"},
 	"/api/events":             {"GET"},
 	"/api/messages":           {"POST"},
+	"/api/tasks":              {"GET", "POST"},
 	"/api/layout":             {"GET", "PUT"},
 	"/api/agents/{id}/status": {"POST"},
 	"/api/approvals":          {"GET"},
@@ -383,6 +386,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	ch, cancel := s.hub.subscribe()
 	defer cancel()
 
+	// A second subscription for tasks. The hub's channel carries
+	// agent and message events; the task store has its own
+	// subscribers because it has its own lock and its own
+	// history. Two subscriptions, one stream: the handler
+	// selects over both.
+	taskCh, taskCancel := s.hub.TaskStore().subscribe()
+	defer taskCancel()
+
 	// Send the current state immediately so the browser
 	// does not render an empty page and then wait for the
 	// next mutation, which may be minutes away.
@@ -407,6 +418,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			if !writeSSE(w, ev) {
+				return
+			}
+			flusher.Flush()
+		case ev, ok := <-taskCh:
 			if !ok {
 				return
 			}
@@ -529,6 +548,29 @@ func decodeJSON(r *http.Request, v any) error {
 	return json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(v)
 }
 
+// handlePostMessage accepts a message and posts it to the
+// communication log.
+//
+// The body names a sender and, optionally, a recipient. An
+// empty recipient is a broadcast.
+//
+// The endpoint is deliberately narrow for an AGENT's message:
+// it moves the message into the log. It does not start, stop,
+// or steer anything. The approval daemon and the CLI own run
+// state, and a second writer would create two sources of
+// truth.
+//
+// The operator's own message is different. A message from an
+// agent is a note between agents and nothing consumes it. A
+// message from the operator is a request for work. So a
+// message from OperatorSender is posted to the log AND turned
+// into a task: the goal becomes a plan, the plan runs, and the
+// browser follows it through the live feed.
+//
+// This is the entry point the product needed. `POST
+// /api/messages` is the one endpoint a client already knows how
+// to call, and before this it was the endpoint that accepted a
+// request and threw it away.
 func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// A body cap: this endpoint takes operator text, not a
 	// document.
@@ -556,7 +598,111 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "`body` is required")
 		return
 	}
-	writeJSON(w, http.StatusCreated, msg)
+
+	// The operator's message is a request for work. If this
+	// server cannot start work, say so -- in the response and
+	// in the log -- rather than accepting the message and
+	// leaving the operator waiting for something that will
+	// never happen.
+	if req.From != OperatorSender {
+		writeJSON(w, http.StatusCreated, msg)
+		return
+	}
+
+	sub := s.hub.Submitter()
+	if sub == nil || !sub.CanSubmit() {
+		writeError(w, http.StatusServiceUnavailable, ErrNoSubmitter.Error())
+		return
+	}
+	id, err := sub.Submit(msg.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"message": msg,
+		"task_id": id,
+	})
+}
+
+// postTaskReq is the POST /api/tasks body.
+//
+// One field on purpose. The operator types what they want done
+// and the system works out the rest. Every extra field here is
+// a question a non-coder cannot answer, and a field they
+// cannot answer is a field that blocks them.
+type postTaskReq struct {
+	Goal string `json:"goal"`
+}
+
+// handlePostTask accepts a plain-language goal and starts work.
+//
+// This is the endpoint that makes the product usable by
+// someone who does not read YAML. The request names what should
+// happen; the server decides how. The response is the task that
+// was created, and the browser follows it through the live
+// event stream.
+func (s *Server) handlePostTask(w http.ResponseWriter, r *http.Request) {
+	// A body cap: this endpoint takes a sentence, not a
+	// document.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var req postTaskReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	goal, ok := normalizeGoal(req.Goal)
+	if !ok {
+		// An empty goal is the one thing that cannot be
+		// guessed at. Everything else about the request the
+		// system can work out for itself.
+		writeError(w, http.StatusBadRequest, "say what you want done")
+		return
+	}
+	sub := s.hub.Submitter()
+	if sub == nil || !sub.CanSubmit() {
+		// The server can watch runs but not start them. Say
+		// so plainly instead of accepting the goal and
+		// dropping it, which would leave the operator staring
+		// at a page that says nothing happened.
+		writeError(w, http.StatusServiceUnavailable, ErrNoSubmitter.Error())
+		return
+	}
+	// The goal joins the conversation before it becomes work.
+	//
+	// "Summarise it" is not a goal on its own; it is a goal
+	// after the operator said which file. The planner is handed
+	// the thread so a second request can refer back to the
+	// first, and the thread is the hub's message log. A goal
+	// that never joins the log is a goal nobody can refer to.
+	//
+	// The message is posted before the submit so the planner's
+	// context includes it; the submitter then leaves the goal
+	// itself out of the context, because the goal is already the
+	// prompt's goal.
+	s.hub.Post(Message{From: OperatorSender, Body: goal})
+	id, err := sub.Submit(goal)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":   id,
+		"goal": goal,
+	})
+}
+
+// handleGetTasks lists the submitted tasks.
+//
+// The browser reads the task list from the SSE stream and the
+// snapshot, so this endpoint exists for a client that wants the
+// list without the live feed -- and for the operator who opened
+// a second tab.
+func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tasks":      s.hub.Tasks(),
+		"can_submit": s.hub.CanSubmitTasks(),
+	})
 }
 
 // agentStatusReq is the POST

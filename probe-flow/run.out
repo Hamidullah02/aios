@@ -1,0 +1,18 @@
+﻿aios.exe : egress: proxy at http://127.0.0.1:55435, allow list has 3 host 
+rule(s); isolation: process group / job object only
+At line:1 char:95
++ ... probe-flow; & "E:\sadi\projects\aiagent\aios-system\var\aios.exe" --y ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (egress: proxy a...job object only 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+approval 382021f4-8cac-45e5-b595-0dd8ddbbea2e: AUTO-APPROVED (--yes) 
+task=bus-worker action=run_shell target=[cmd /c echo shellran > marker.txt]
+Plan:      probe-1
+Tasks:     1
+From:      0
+Started:   2026-10-26T10:13:00.6296177Z
+Finished:  2026-10-26T10:13:00.6546988Z
+Stopped:   completed
+Budget:    cost=0.0000 tool=2 model=0 net=0

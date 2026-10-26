@@ -199,6 +199,22 @@ type Hub struct {
 	// deciding anything itself, so there is still exactly one
 	// source of truth for run state.
 	approvals *approvalRegistry
+
+	// tasks holds the things an operator asked for from the
+	// browser, and what became of them.
+	//
+	// It is separate from the agent panels on purpose. An agent
+	// panel is the machinery doing the work; a task is the job
+	// the operator asked for. The task exists before any agent
+	// does and outlives them, so it cannot be derived from the
+	// agent list -- and an operator who typed one sentence and
+	// watched it fail needs to see that sentence next to the
+	// failure.
+	tasks *TaskStore
+
+	// submitter turns an operator's goal into work. It is nil
+	// when this server is read-only over run state.
+	submitter TaskSubmitter
 }
 
 // NewHub returns an empty hub with the default layout.
@@ -209,6 +225,7 @@ func NewHub() *Hub {
 		msgLimit:  DefaultMsgLimit,
 		layout:    DefaultLayout(),
 		approvals: newApprovalRegistry(nil),
+		tasks:     NewTaskStore(),
 	}
 }
 
@@ -503,6 +520,60 @@ func (h *Hub) DecideApproval(id string, approve bool) (string, error) {
 	return state, nil
 }
 
+// Tasks returns the submitted tasks, oldest first.
+func (h *Hub) Tasks() []Task {
+	if h == nil {
+		return nil
+	}
+	return h.tasks.Tasks()
+}
+
+// TaskStore returns the hub's task store.
+func (h *Hub) TaskStore() *TaskStore {
+	if h == nil {
+		return nil
+	}
+	return h.tasks
+}
+
+// SetSubmitter attaches the thing that turns a goal into work.
+//
+// It is set after NewHub rather than in the constructor
+// because the run builds its planner and its hub in either
+// order, and the hub is also created by a server that never
+// runs anything.
+func (h *Hub) SetSubmitter(s TaskSubmitter) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.submitter = s
+	h.mu.Unlock()
+}
+
+// Submitter returns the attached submitter, or nil.
+func (h *Hub) Submitter() TaskSubmitter {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	s := h.submitter
+	h.mu.RUnlock()
+	return s
+}
+
+// CanSubmitTasks reports whether this hub can start work.
+//
+// False means the operator must be pointed somewhere else
+// rather than shown a button that cannot work.
+func (h *Hub) CanSubmitTasks() bool {
+	if h == nil {
+		return false
+	}
+	s := h.Submitter()
+	return s != nil && s.CanSubmit()
+}
+
 // subscribe registers a listener and returns the channel
 // plus a cancel func.
 //
@@ -566,6 +637,15 @@ type Snapshot struct {
 	Agents   []Agent   `json:"agents"`
 	Messages []Message `json:"messages"`
 	Layout   Layout    `json:"layout"`
+	// Tasks are the things an operator asked for from the
+	// browser. Always present, never null: the UI checks
+	// length, and a null that is sometimes an array is a
+	// footgun in JavaScript.
+	Tasks []Task `json:"tasks"`
+	// CanSubmitTasks says whether this server can start work.
+	// False means the operator must use another route, and the
+	// UI must not offer a submit button that cannot work.
+	CanSubmitTasks bool `json:"can_submit_tasks"`
 	// Approvals are the requests waiting on an operator
 	// decision. Always present, never null: the UI checks
 	// length, and a null that is sometimes an array is a
@@ -593,6 +673,12 @@ func (h *Hub) Snapshot() Snapshot {
 	if h == nil {
 		return Snapshot{Version: 0}
 	}
+	// The task store has its own lock. Read it before taking
+	// the hub lock so the two are never held at once: the hub
+	// lock is the outer one everywhere else, and a reader that
+	// acquires them in the other order is a deadlock waiting
+	// for a writer to arrive between the two.
+	tasks := h.tasks.Tasks()
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	agents := make([]Agent, 0, len(h.agents))
@@ -602,10 +688,18 @@ func (h *Hub) Snapshot() Snapshot {
 	sort.Slice(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
 	msgs := make([]Message, len(h.msgs))
 	copy(msgs, h.msgs)
+	// Read the submitter under the lock already held rather
+	// than calling CanSubmitTasks, which would take the read
+	// lock a second time. Go's RWMutex blocks a recursive read
+	// lock when a writer is queued, so the nested call could
+	// deadlock this very snapshot.
+	canSubmit := h.submitter != nil && h.submitter.CanSubmit()
 	return Snapshot{
 		Agents:              agents,
 		Messages:            msgs,
 		Layout:              h.layout,
+		Tasks:               tasks,
+		CanSubmitTasks:      canSubmit,
 		Approvals:           h.approvals.Pending(),
 		CanResolveApprovals: h.approvals.CanResolve(),
 		Version:             h.version,

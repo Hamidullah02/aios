@@ -95,7 +95,7 @@ func newFixTestDeps(t *testing.T, dir string, resp []models.Response) *Deps {
 	router := models.NewRouter(map[string]models.Adapter{
 		"openai": stub,
 	}, reg, prices)
-	tools := plannerToolSpecs()
+	tools := plannerToolSpecs(testBus(t))
 	pl, err := planner.NewPlanner(planner.Config{
 		Router:       router,
 		Tools:        tools,
@@ -288,7 +288,7 @@ func TestRunFix_EndToEndWithHTTPServer(t *testing.T) {
 		{Model: "stub-1", InputPer1K: 0.001, OutputPer1K: 0.002},
 	}, nil)
 	router := models.NewRouter(map[string]models.Adapter{"openai": stub}, reg, prices)
-	tools := plannerToolSpecs()
+	tools := plannerToolSpecs(testBus(t))
 	pl, _ := planner.NewPlanner(planner.Config{
 		Router:       router,
 		Tools:        tools,

@@ -2,7 +2,10 @@ package audit
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -256,10 +259,25 @@ func TestOpen_EmptyPath(t *testing.T) {
 	}
 }
 
-func TestOpen_NonExistentDir(t *testing.T) {
-	// Use a path inside a non-existent directory.
-	if _, err := Open(Config{Path: "/no/such/dir/db.sqlite"}); err == nil {
-		t.Fatal("expected error")
+func TestOpen_CreatesTheParentDirectory(t *testing.T) {
+	// Open's contract is "opens or creates a Log". A sqlite
+	// file cannot be created in a directory that does not
+	// exist, so Open creates the directory.
+	//
+	// It used to fail instead, with sqlite's error for "no such
+	// directory": "ping: unable to open database file: out of
+	// memory (14)". That named neither the cause nor the fix,
+	// and it hit on a first run in a fresh workspace -- the
+	// operator was told to run `aios init`, a step they had no
+	// way to know about.
+	dir := filepath.Join(t.TempDir(), "var")
+	log, err := Open(Config{Path: filepath.Join(dir, "audit.db")})
+	if err != nil {
+		t.Fatalf("Open did not create the directory: %v", err)
+	}
+	defer log.Close()
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("the directory was not created: %v", err)
 	}
 }
 
@@ -283,6 +301,52 @@ func TestClose_Idempotent(t *testing.T) {
 	}
 	if err := log.Close(); err != nil {
 		t.Fatalf("second close should be a no-op: %v", err)
+	}
+}
+
+// TestClose_WaitsForAnInFlightWrite pins that closing the log
+// does not pull the database out from under a write that is
+// already running.
+//
+// The web UI starts a run in its own goroutine and the process
+// closes the audit log on the way out. Before the handle took a
+// lock of its own, Close set the pointer to nil while the run's
+// tracer was reading it: the race detector flagged it, and the
+// run's audit rows would have failed with "sql: database is
+// closed" halfway through.
+func TestClose_WaitsForAnInFlightWrite(t *testing.T) {
+	log, err := Open(Config{Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Close in a goroutine while a write is in flight. The
+	// assertion is not on the timing: it is that neither side
+	// reports a closed database and that the race detector sees
+	// no unsynchronised access to the handle.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			_, _ = log.Write(&Row{
+				TaskID: "t", Kind: "k", Actor: "op",
+				Payload: map[string]any{"i": i},
+			})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		_ = log.Close()
+	}()
+	wg.Wait()
+
+	// After the close the log is unusable, and it says so.
+	_, err = log.Write(&Row{TaskID: "t", Kind: "k", Actor: "op"})
+	if err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("write after close = %v, want a closed error", err)
+	}
+	if _, err := log.GetByTask("t"); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("read after close = %v, want a closed error", err)
 	}
 }
 

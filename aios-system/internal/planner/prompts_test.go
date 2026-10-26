@@ -25,6 +25,55 @@ func TestRenderUser_WithGoalOnly(t *testing.T) {
 	}
 }
 
+// TestRenderUser_PlatformTellsTheModelWhichOSItIs pins that
+// the prompt names the operating system.
+//
+// Without it the model writes Unix commands -- `ls`, `cat`,
+// `date` -- and on Windows those programs do not exist, so the
+// plan fails with "executable file not found in %PATH%". An
+// operator reads that as a broken installation.
+func TestRenderUser_PlatformTellsTheModelWhichOSItIs(t *testing.T) {
+	win, err := RenderUser(PromptData{Goal: "g", Platform: "windows"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(win, "Platform: windows") {
+		t.Errorf("the prompt does not name the platform:\n%s", win)
+	}
+	if !strings.Contains(win, "dir") || !strings.Contains(win, "ls") {
+		t.Errorf("the Windows prompt does not say which command to use:\n%s", win)
+	}
+
+	unix, err := RenderUser(PromptData{Goal: "g", Platform: "linux"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(unix, "Platform: linux") {
+		t.Errorf("the prompt does not name the platform:\n%s", unix)
+	}
+}
+
+// TestRenderRepair_PlatformIsCarried pins that the repair
+// prompt names the platform too.
+//
+// The repair prompt is the one that fixes a failed plan. A plan
+// that failed because it used `ls` on Windows is repaired with
+// the same Unix command if the repair prompt does not say what
+// the platform is.
+func TestRenderRepair_PlatformIsCarried(t *testing.T) {
+	got, err := RenderRepair(PromptData{
+		Goal:     "g",
+		Platform: "windows",
+		Errors:   PlanErrorList{{Code: CodeSchema, Message: "x"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Platform: windows") {
+		t.Errorf("the repair prompt does not name the platform:\n%s", got)
+	}
+}
+
 func TestRenderUser_WithContext(t *testing.T) {
 	got, err := RenderUser(PromptData{
 		Goal:    "ship aios",

@@ -184,21 +184,21 @@ func TestCoverage_RunAudit_NilDeps(t *testing.T) {
 }
 
 func TestCoverage_RunDaemon_UnknownSubcommand(t *testing.T) {
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	args := &Args{Command: CmdDaemon, Subcommand: "restart"}
 	deps := &Deps{}
-	code := runDaemon(context.Background(), args, deps, &stderr)
+	code := runDaemon(context.Background(), args, deps, &stdout, &stderr)
 	if code == 0 {
 		t.Fatal("expected non-zero")
 	}
 }
 
 func TestCoverage_RunDaemon_StopNoPID(t *testing.T) {
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	dir := t.TempDir()
 	args := &Args{Command: CmdDaemon, Subcommand: DaemonStop, DaemonPID: filepath.Join(dir, "x.pid")}
 	deps := &Deps{}
-	code := runDaemon(context.Background(), args, deps, &stderr)
+	code := runDaemon(context.Background(), args, deps, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("code: %d, stderr: %s", code, stderr.String())
 	}
@@ -208,12 +208,12 @@ func TestCoverage_RunDaemon_StartCancel(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "a.sock")
 	pid := filepath.Join(dir, "a.pid")
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	args := &Args{Command: CmdDaemon, Subcommand: DaemonStart, SocketPath: sock, DaemonPID: pid}
 	deps := &Deps{}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
-	go func() { done <- runDaemon(ctx, args, deps, &stderr) }()
+	go func() { done <- runDaemon(ctx, args, deps, &stdout, &stderr) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if _, err := os.Stat(sock); err == nil {
@@ -233,6 +233,47 @@ func TestCoverage_RunDaemon_StartCancel(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runDaemon did not return after cancel")
+	}
+}
+
+// TestCoverage_RunDaemon_StartAnnouncesReady pins that the daemon
+// says it is up.
+//
+// `aios daemon start` is a foreground service: it binds the socket
+// and then blocks. Before this, it printed nothing at all, so the
+// operator saw a command that looked hung and had no way to tell
+// "it is running" from "it died before it started". The line has
+// to name the socket, because that is the path `aios approve` will
+// use.
+func TestCoverage_RunDaemon_StartAnnouncesReady(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "a.sock")
+	pid := filepath.Join(dir, "a.pid")
+	// A syncBuffer, not a bytes.Buffer: the daemon writes the
+	// announcement from its own goroutine while this test reads
+	// it, and bytes.Buffer is not safe for that.
+	out := &syncBuffer{}
+	var stderr bytes.Buffer
+	args := &Args{Command: CmdDaemon, Subcommand: DaemonStart, SocketPath: sock, DaemonPID: pid}
+	deps := &Deps{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan int, 1)
+	go func() { done <- runDaemon(ctx, args, deps, out, &stderr) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if strings.Contains(out.String(), "ready") {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("the daemon never announced itself; stdout = %q", out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(out.String(), sock) {
+		t.Errorf("the announcement should name the socket; stdout = %q", out.String())
 	}
 }
 
@@ -818,9 +859,30 @@ func TestCoverage_Run_ApprovalHandlerError(t *testing.T) {
 
 // --- Report coverage: more branches ---
 
+// writeReportRow writes one audit row for a task so the report
+// has something to format.
+//
+// The report used to print "null" for a task with no rows,
+// which is valid JSON and no use to anyone. It now returns an
+// error, so these tests need a row to reach the formatting
+// branches they are here to cover.
+func writeReportRow(t *testing.T, log *audit.Log, taskID string) {
+	t.Helper()
+	row := &audit.Row{
+		TaskID:  taskID,
+		Kind:    "task_started",
+		Actor:   "runtime",
+		Payload: []byte(`{"step":"start"}`),
+	}
+	if _, err := log.Write(row); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCoverage_Report_Json(t *testing.T) {
 	log := openTestAudit(t)
 	defer log.Close()
+	writeReportRow(t, log, "x")
 	if err := Report("x", ReportDeps{Audit: log, Format: "json", Out: &bytes.Buffer{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -829,6 +891,7 @@ func TestCoverage_Report_Json(t *testing.T) {
 func TestCoverage_Report_Markdown(t *testing.T) {
 	log := openTestAudit(t)
 	defer log.Close()
+	writeReportRow(t, log, "x")
 	if err := Report("x", ReportDeps{Audit: log, Format: "markdown", Out: &bytes.Buffer{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -837,8 +900,51 @@ func TestCoverage_Report_Markdown(t *testing.T) {
 func TestCoverage_Report_Html(t *testing.T) {
 	log := openTestAudit(t)
 	defer log.Close()
+	writeReportRow(t, log, "x")
 	if err := Report("x", ReportDeps{Audit: log, Format: "html", Out: &bytes.Buffer{}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestCoverage_Report_NoRows pins that a task with no rows is
+// an error rather than a "null" document.
+//
+// The JSON path printed "null": valid JSON, and no use to
+// anyone who asked for a report and got it.
+func TestCoverage_Report_NoRows(t *testing.T) {
+	log := openTestAudit(t)
+	defer log.Close()
+	err := Report("nosuchtask", ReportDeps{Audit: log, Format: "json", Out: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected an error for a task with no rows")
+	}
+}
+
+// TestCoverage_Report_HtmlEscapes pins that the HTML report
+// escapes the values it prints.
+//
+// The report is written to a file an operator opens in a
+// browser. The kind and the hash come from the audit log, and
+// a task id can be anything the caller passes. Unescaped, a
+// value containing markup becomes markup.
+func TestCoverage_Report_HtmlEscapes(t *testing.T) {
+	log := openTestAudit(t)
+	defer log.Close()
+	row := &audit.Row{
+		TaskID:  "x",
+		Kind:    "<script>alert(1)</script>",
+		Actor:   "runtime",
+		Payload: []byte(`{"step":"start"}`),
+	}
+	if _, err := log.Write(row); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Report("x", ReportDeps{Audit: log, Format: "html", Out: &buf}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "<script>") {
+		t.Errorf("the HTML report does not escape its values:\n%s", buf.String())
 	}
 }
 
@@ -1247,10 +1353,10 @@ func TestCoverage_RunDaemon_StopSuccess(t *testing.T) {
 	if err := os.WriteFile(pid, []byte("12345"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	args := &Args{Command: CmdDaemon, Subcommand: DaemonStop, DaemonPID: pid}
 	deps := &Deps{}
-	code := runDaemon(context.Background(), args, deps, &stderr)
+	code := runDaemon(context.Background(), args, deps, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("code: %d, stderr: %s", code, stderr.String())
 	}
@@ -1263,12 +1369,12 @@ func TestCoverage_RunDaemon_StartSuccess(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "a.sock")
 	pid := filepath.Join(dir, "a.pid")
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	args := &Args{Command: CmdDaemon, Subcommand: DaemonStart, SocketPath: sock, DaemonPID: pid}
 	deps := &Deps{}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
-	go func() { done <- runDaemon(ctx, args, deps, &stderr) }()
+	go func() { done <- runDaemon(ctx, args, deps, &stdout, &stderr) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if _, err := os.Stat(sock); err == nil {

@@ -36,8 +36,10 @@ func uiWFA(id string) *runtime.WaitingForApproval {
 // and offered nothing. Now the decision reaches the run.
 func TestUIApproval_DecideFromHub(t *testing.T) {
 	hub := webui.NewHub()
-	var out bytes.Buffer
-	h := NewUIApprovalHandler(hub, &out, "http://127.0.0.1:9999/")
+	// A sync buffer, not a bytes.Buffer: the handler writes from
+	// the run's goroutine while this test reads from its own.
+	out := &syncBuffer{}
+	h := NewUIApprovalHandler(hub, out, "http://127.0.0.1:9999/")
 
 	type result struct {
 		ok  bool
@@ -311,17 +313,36 @@ func startFakeDaemon(t *testing.T) string {
 	d := NewDaemon(DaemonConfig{SocketPath: sock, PidPath: filepath.Join(dir, "d.pid"), Approvals: svc})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	go func() { _ = d.Start(ctx) }()
+
+	// The bind error is captured rather than discarded. A daemon
+	// that fails to start used to look exactly like a daemon that
+	// was slow to start: both ended with "socket never appeared",
+	// and the second reading sent people looking at timeouts when
+	// the real cause was a refused bind.
+	started := make(chan error, 1)
+	go func() { started <- d.Start(ctx) }()
 	t.Cleanup(func() { _ = d.Stop() })
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if c, err := net.Dial("unix", sock); err == nil {
 			_ = c.Close()
 			return sock
 		}
+		// A bind failure is final; there is no point waiting.
+		select {
+		case err := <-started:
+			if err != nil {
+				t.Fatalf("daemon failed to start: %v", err)
+			}
+			// Start returned nil, so the daemon stopped on its
+			// own. That is also final.
+			t.Fatal("daemon exited before the socket became reachable")
+		default:
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("daemon socket never appeared")
+			t.Fatalf("daemon socket never appeared at %s (socket path length %d)",
+				sock, len(sock))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

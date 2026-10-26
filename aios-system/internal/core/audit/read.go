@@ -9,13 +9,15 @@ import (
 // ascending. The returned slice is in chain order; verify_chain
 // walks it from index 0.
 func (l *Log) GetByTask(taskID string) ([]PersistedRow, error) {
-	if l.db == nil {
-		return nil, errors.New("audit.Log: closed")
-	}
 	if taskID == "" {
 		return nil, errors.New("audit.Log.GetByTask: task_id is required")
 	}
-	rows, err := l.db.Query(`
+	db, err := l.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer l.dbMu.RUnlock()
+	rows, err := db.Query(`
 SELECT sequence_number, row_id, task_id, step_id, kind, actor, risk_tier,
        approval_id, idempotency_key, payload, redacted_hash, content_hash,
        chain_hash, ts_ns
@@ -33,13 +35,15 @@ ORDER BY sequence_number ASC
 // GetByApproval returns all rows that reference approvalID,
 // ordered by sequence_number ascending.
 func (l *Log) GetByApproval(approvalID string) ([]PersistedRow, error) {
-	if l.db == nil {
-		return nil, errors.New("audit.Log: closed")
-	}
 	if approvalID == "" {
 		return nil, errors.New("audit.Log.GetByApproval: approval_id is required")
 	}
-	rows, err := l.db.Query(`
+	db, err := l.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer l.dbMu.RUnlock()
+	rows, err := db.Query(`
 SELECT sequence_number, row_id, task_id, step_id, kind, actor, risk_tier,
        approval_id, idempotency_key, payload, redacted_hash, content_hash,
        chain_hash, ts_ns
@@ -57,16 +61,18 @@ ORDER BY sequence_number ASC
 // GetByKind returns all rows of a given kind, ordered by
 // sequence_number ascending. Used by aios-report for analytics.
 func (l *Log) GetByKind(kind string, limit int) ([]PersistedRow, error) {
-	if l.db == nil {
-		return nil, errors.New("audit.Log: closed")
-	}
 	if kind == "" {
 		return nil, errors.New("audit.Log.GetByKind: kind is required")
 	}
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := l.db.Query(`
+	db, err := l.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer l.dbMu.RUnlock()
+	rows, err := db.Query(`
 SELECT sequence_number, row_id, task_id, step_id, kind, actor, risk_tier,
        approval_id, idempotency_key, payload, redacted_hash, content_hash,
        chain_hash, ts_ns
@@ -98,13 +104,15 @@ LIMIT ?
 // go stale as new kinds are added, and the primary key makes
 // the sort cheap.
 func (l *Log) Recent(limit int) ([]PersistedRow, error) {
-	if l.db == nil {
-		return nil, errors.New("audit.Log: closed")
-	}
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := l.db.Query(`
+	db, err := l.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer l.dbMu.RUnlock()
+	rows, err := db.Query(`
 SELECT sequence_number, row_id, task_id, step_id, kind, actor, risk_tier,
        approval_id, idempotency_key, payload, redacted_hash, content_hash,
        chain_hash, ts_ns
@@ -141,9 +149,6 @@ LIMIT ?
 // cheaply. The field is restricted to top-level string
 // fields; nested paths or non-string values return an error.
 func (l *Log) GetByKindPayloadField(kind, field, value string, limit int) ([]PersistedRow, error) {
-	if l.db == nil {
-		return nil, errors.New("audit.Log: closed")
-	}
 	if kind == "" {
 		return nil, errors.New("audit.Log.GetByKindPayloadField: kind is required")
 	}
@@ -157,7 +162,12 @@ func (l *Log) GetByKindPayloadField(kind, field, value string, limit int) ([]Per
 	// any double-quote in field for safety; the field name
 	// is package-controlled so this is defense in depth.
 	path := "$." + field
-	rows, err := l.db.Query(`
+	db, err := l.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer l.dbMu.RUnlock()
+	rows, err := db.Query(`
 SELECT sequence_number, row_id, task_id, step_id, kind, actor, risk_tier,
        approval_id, idempotency_key, payload, redacted_hash, content_hash,
        chain_hash, ts_ns

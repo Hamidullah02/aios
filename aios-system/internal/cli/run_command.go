@@ -27,12 +27,12 @@ type ApprovalHandler interface {
 // filled by the caller (the Main entry point builds the
 // production deps; tests build fakes).
 type RunDeps struct {
-	Audit        *audit.Log
-	Policy       *policy.Gateway
-	Resume       *runtime.ResumeHandler
-	Worker       runtime.Worker
-	Verifier     runtime.Verifier
-	Budget       runtime.Budget
+	Audit    *audit.Log
+	Policy   *policy.Gateway
+	Resume   *runtime.ResumeHandler
+	Worker   runtime.Worker
+	Verifier runtime.Verifier
+	Budget   runtime.Budget
 	// Grants records approvals given during this run and is
 	// what the bus consults so a retried task does not
 	// re-prompt for a call the operator already answered.
@@ -112,14 +112,14 @@ func Run(ctx context.Context, args *Args, deps RunDeps) (*runtime.Report, error)
 	}
 	// Delegate to the shared approval loop.
 	report, err := runWithApprovals(ctx, plan, nil, ResumeDeps{
-		Audit:    deps.Audit,
-		Resume:   deps.Resume,
-		Worker:   deps.Worker,
-		Verify:   deps.Verifier,
-		Budget:   deps.Budget,
-		Approve:  deps.Approval,
+		Audit:      deps.Audit,
+		Resume:     deps.Resume,
+		Worker:     deps.Worker,
+		Verify:     deps.Verifier,
+		Budget:     deps.Budget,
+		Approve:    deps.Approval,
 		GrantStore: deps.Grants,
-		Observer: deps.Observer,
+		Observer:   deps.Observer,
 	}, "run")
 	if err == nil && deps.ReportWriter != nil {
 		if wErr := deps.ReportWriter(report); wErr != nil {

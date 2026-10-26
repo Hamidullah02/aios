@@ -46,11 +46,12 @@ type namespacePolicy struct {
 // namespace is there, and they close the two escape routes that
 // survive without them: a child that mounts something new, and a
 // child whose orphans get re-parented and outlive the kill.
-var defaultNamespacePolicy = namespacePolicy{
-	User:    true,
-	Network: true,
-	Mount:   true,
-	PID:     true,
+var defaultNamespacePolicy = defaultNamespacePolicyValue()
+
+// defaultNamespacePolicyValue returns the internal policy that
+// matches the exported one.
+func defaultNamespacePolicyValue() namespacePolicy {
+	return internalPolicy(DefaultNamespacePolicy())
 }
 
 // configureNamespaces puts the child in the configured

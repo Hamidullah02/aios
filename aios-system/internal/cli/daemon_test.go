@@ -161,6 +161,169 @@ func TestDaemon_RequestGrant(t *testing.T) {
 	}
 }
 
+// TestDaemon_WaitBlocksUntilDecided is the regression gate for
+// the daemon "wait" verb.
+//
+// The verb answered with the CURRENT state, so a wait on a
+// just-created approval returned "pending" immediately. The run
+// that asked for the wait read that back, saw a state that was
+// not "granted", and reported it as a denial -- the run denied
+// itself before any operator had a chance to act:
+//
+//	approval ef0b7c74-...: pending
+//	error: approval: run: operator denied the action
+//
+// The wait has to park until the approval is decided.
+func TestDaemon_WaitBlocksUntilDecided(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "a.sock")
+	pid := filepath.Join(dir, "a.pid")
+	log := newTestAudit(t)
+	svc := approvals.New(approvals.Config{Audit: log})
+	d := NewDaemon(DaemonConfig{SocketPath: sock, PidPath: pid, Approvals: svc})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = d.Start(ctx) }()
+	defer d.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(sock); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("socket did not appear")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Request an approval and ask a SECOND connection to wait
+	// for it. The wait must not answer while the approval is
+	// still pending.
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	enc := json.NewEncoder(conn)
+	dec := json.NewDecoder(conn)
+
+	payload := schemas.ApprovalPayload{
+		Action:      "write",
+		Target:      "/var/secrets.txt",
+		Reason:      "test",
+		RequesterID: "tester",
+	}
+	if err := enc.Encode(map[string]any{
+		"kind":    "request",
+		"actor":   "tester",
+		"payload": payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resp map[string]any
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := resp["id"].(string)
+	if id == "" {
+		t.Fatal("missing id")
+	}
+
+	waitConn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waitConn.Close()
+	waitEnc := json.NewEncoder(waitConn)
+	waitDec := json.NewDecoder(waitConn)
+	if err := waitEnc.Encode(map[string]any{"kind": "wait", "id": id}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The wait must still be outstanding: no response yet.
+	answered := make(chan map[string]any, 1)
+	go func() {
+		var r map[string]any
+		if err := waitDec.Decode(&r); err == nil {
+			answered <- r
+		}
+	}()
+	select {
+	case r := <-answered:
+		t.Fatalf("wait answered before a decision was made: %v", r)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// Now grant it. The blocked wait must wake up and report the
+	// terminal state.
+	if err := enc.Encode(map[string]any{
+		"kind":  "grant",
+		"id":    id,
+		"actor": "operator",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ := resp["state"].(string); state != "granted" {
+		t.Fatalf("grant state = %q, want granted", state)
+	}
+
+	select {
+	case r := <-answered:
+		if state, _ := r["state"].(string); state != "granted" {
+			t.Errorf("wait state = %q, want granted", state)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("wait did not wake up after the grant")
+	}
+}
+
+// TestDaemon_WaitOnUnknownID checks the error path: waiting on
+// an id the daemon never issued must not hang.
+func TestDaemon_WaitOnUnknownID(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "a.sock")
+	pid := filepath.Join(dir, "a.pid")
+	log := newTestAudit(t)
+	svc := approvals.New(approvals.Config{Audit: log})
+	d := NewDaemon(DaemonConfig{SocketPath: sock, PidPath: pid, Approvals: svc})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = d.Start(ctx) }()
+	defer d.Stop()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(sock); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("socket did not appear")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	enc := json.NewEncoder(conn)
+	dec := json.NewDecoder(conn)
+	if err := enc.Encode(map[string]any{"kind": "wait", "id": "nosuchid"}); err != nil {
+		t.Fatal(err)
+	}
+	var resp map[string]any
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := resp["ok"].(bool); ok {
+		t.Fatalf("expected ok=false for an unknown approval id: %v", resp)
+	}
+}
+
 func TestDaemon_UnknownKind(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "a.sock")

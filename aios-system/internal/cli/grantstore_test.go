@@ -114,8 +114,8 @@ func TestGrantStore_DoesNotOverreach(t *testing.T) {
 	g.Grant(pointerWFA("uuid-1", "t1", "shell", "echo hi"))
 
 	cases := []struct {
-		name                        string
-		task, action, target        string
+		name                 string
+		task, action, target string
 	}{
 		{"different target", "t1", "shell", "rm -rf /"},
 		{"different task", "t2", "shell", "echo hi"},

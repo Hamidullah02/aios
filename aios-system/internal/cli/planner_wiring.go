@@ -2,61 +2,56 @@ package cli
 
 import (
 	"github.com/sadi/aios-system/internal/planner"
+	"github.com/sadi/aios-system/internal/tools"
 )
 
 // plannerToolSpecs is the planner's view of the production
-// tool set. The planner does not import the bus's Tool type
-// (it depends on aios-tools only through the prompt
-// rendering layer); it consumes a flat {Name, Description,
-// InputSchema, RiskTier} map. The descriptions and
-// schemas are the strings the model reads when it
-// decides which tool to dispatch to.
+// tool set.
 //
-// The tool list mirrors the bus's tool map in
-// wireAgentLoop. The two are deliberately kept in sync
-// by hand: the bus's runtime contracts (file paths,
-// argv, timeouts) match the planner's published
-// schemas here. If a new tool is added to the bus,
-// add a corresponding entry here. The reviewer
-// flagged this duplication; the v0.32.0 refactor
-// already noted that the planner and the bus are
-// separated by design and the seam is a typed
-// bridge.
+// The planner does not import the bus's Tool type; it consumes
+// a flat {Name, Description, InputSchema, RiskTier} map. This
+// function is the bridge: it reads the bus's live tool map and
+// projects it into that shape.
 //
-// Risk tiers follow the bus's riskFromArgs default
-// of 1, with read-only tools at 0 and shell at 2
-// (matching the doc set's risk table).
-func plannerToolSpecs() map[string]planner.ToolSpec {
-	return map[string]planner.ToolSpec{
-		"read_file": {
-			Name:        "read_file",
-			Description: "Read a file from the workspace. Args: path (required, relative to --workspace or absolute inside the workspace), offset (optional int), limit (optional int).",
-			InputSchema: `{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}`,
-			RiskTier:    0,
-		},
-		"search_files": {
-			Name:        "search_files",
-			Description: "Search the workspace for files whose path matches a glob. Args: pattern (required), include (optional glob), exclude (optional glob), max (optional int default 1000).",
-			InputSchema: `{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"include":{"type":"string"},"exclude":{"type":"string"},"max":{"type":"integer"}}}`,
-			RiskTier:    0,
-		},
-		"write_file": {
-			Name:        "write_file",
-			Description: "Write a file in the workspace atomically. Args: path (required, inside the workspace), content (required string), mode (optional int, default 0644).",
-			InputSchema: `{"type":"object","required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"integer"}}}`,
-			RiskTier:    1,
-		},
-		"run_shell": {
-			Name:        "run_shell",
-			Description: "Run a shell command. Args: command (required argv as a JSON array of strings), timeout (optional int seconds, default 60), cwd (optional), env (optional map).",
-			InputSchema: `{"type":"object","required":["command"],"properties":{"command":{"type":"array","items":{"type":"string"}},"timeout":{"type":"integer"},"cwd":{"type":"string"},"env":{"type":"object","additionalProperties":{"type":"string"}}}}`,
-			RiskTier:    2,
-		},
-		"ask_user": {
-			Name:        "ask_user",
-			Description: "Ask the operator a multiple-choice question. Args: question (required object: {id, prompt, options[]}). The answer is recorded in the audit log.",
-			InputSchema: `{"type":"object","required":["question"],"properties":{"question":{"type":"object","required":["id","prompt","options"],"properties":{"id":{"type":"string"},"prompt":{"type":"string"},"options":{"type":"array","items":{"type":"object","required":["id","label"],"properties":{"id":{"type":"string"},"label":{"type":"string"},"description":{"type":"string"}}}}}}}}`,
-			RiskTier:    0,
-		},
+// It used to be a hand-written table of five tools that
+// "mirrored" the bus by hand. The mirroring did not hold: the
+// bus carried twenty-five tools and the planner knew five, so
+// twenty working tools — edit, apply_patch, grep, code_search,
+// git_commit and the rest — could not be named in a plan. They
+// were dead code however well they worked, and `aios tools`
+// listed them as though they were reachable.
+//
+// Deriving the list from the bus removes the drift by
+// construction. A tool added to the bus is offered to the
+// planner automatically; a tool removed from the bus
+// disappears from the planner's prompt. The two can no longer
+// disagree, because there is only one list.
+//
+// The tool's own Describe method supplies the description and
+// the JSON schema, so the text the model reads lives in the
+// same file as the code that reads the arguments. A schema
+// that drifts from its implementation produces a plan that
+// fails at the tool call with no hint that the model had been
+// misled.
+//
+// A tool that does not implement tools.Describer still appears
+// in the map, with a placeholder description and an empty
+// schema. It is better to tell the model that a tool's
+// arguments are undocumented than to hide the tool: the model
+// can then choose not to use it, whereas a hidden tool is one
+// the operator believes exists and cannot reach.
+func plannerToolSpecs(bus *tools.Bus) map[string]planner.ToolSpec {
+	out := make(map[string]planner.ToolSpec)
+	if bus == nil {
+		return out
 	}
+	for name, spec := range bus.Specs() {
+		out[name] = planner.ToolSpec{
+			Name:        spec.Name,
+			Description: spec.Description,
+			InputSchema: spec.InputSchema,
+			RiskTier:    spec.Risk,
+		}
+	}
+	return out
 }

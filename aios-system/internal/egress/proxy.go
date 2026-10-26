@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -47,12 +48,41 @@ type Proxy struct {
 	// listen is the configured listen address (host:port).
 	listen string
 
+	// mu guards server.
+	//
+	// The server is published by Listen and read by Addr and
+	// Shutdown, which run on different goroutines: Listen is
+	// called by the goroutine that starts serving, while Shutdown
+	// is called from wherever the owner decides to stop it. Without
+	// the lock, Shutdown can read a half-written *http.Server and
+	// call Shutdown on it, and Addr can read a torn pointer.
+	mu sync.RWMutex
+
 	// server is the running http.Server. Nil until Serve is called.
 	server *http.Server
 
 	// requestCounter is a monotonic counter used as a fallback
 	// request id when the client did not supply X-Aios-Request-Id.
 	requestCounter uint64
+}
+
+// serverRef returns the running server under the lock.
+//
+// Every read of p.server goes through here. The returned pointer is
+// stable once set, so the caller may use it after the lock is
+// released: Listen replaces the pointer only by assigning a brand
+// new server, and that happens once, before any reader exists.
+func (p *Proxy) serverRef() *http.Server {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.server
+}
+
+// setServer publishes the server under the lock.
+func (p *Proxy) setServer(s *http.Server) {
+	p.mu.Lock()
+	p.server = s
+	p.mu.Unlock()
 }
 
 // serveConnect handles an HTTP CONNECT tunnel.
@@ -318,7 +348,7 @@ func (p *Proxy) Serve() error {
 	if err != nil {
 		return err
 	}
-	return p.server.Serve(ln)
+	return p.serverRef().Serve(ln)
 }
 
 // ServeListener serves on an already-bound listener.
@@ -327,10 +357,11 @@ func (p *Proxy) Serve() error {
 // knows the address before the proxy starts accepting, and then
 // serves on that same listener.
 func (p *Proxy) ServeListener(ln net.Listener) error {
-	if p.server == nil {
+	srv := p.serverRef()
+	if srv == nil {
 		return fmt.Errorf("egress: serve: listener not bound")
 	}
-	return p.server.Serve(ln)
+	return srv.Serve(ln)
 }
 
 // Listen binds the proxy's socket without serving on it.
@@ -345,30 +376,32 @@ func (p *Proxy) Listen() (net.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("egress: listen %s: %w", p.listen, err)
 	}
-	p.server = &http.Server{
+	p.setServer(&http.Server{
 		Addr:              ln.Addr().String(),
 		Handler:           p.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
-	}
+	})
 	return ln, nil
 }
 
 // Shutdown gracefully stops the server. Safe to call from another
 // goroutine; the caller's context controls the shutdown timeout.
 func (p *Proxy) Shutdown(ctx context.Context) error {
-	if p.server == nil {
+	srv := p.serverRef()
+	if srv == nil {
 		return nil
 	}
-	return p.server.Shutdown(ctx)
+	return srv.Shutdown(ctx)
 }
 
 // Addr returns the bound listen address. Only valid after Serve has
 // been called.
 func (p *Proxy) Addr() string {
-	if p.server == nil {
+	srv := p.serverRef()
+	if srv == nil {
 		return p.listen
 	}
-	return p.server.Addr
+	return srv.Addr
 }
 
 // URL returns the proxy URL a child should be pointed at.

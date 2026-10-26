@@ -16,16 +16,20 @@ import (
 // call is blocked on a channel and the run loop is otherwise
 // live.
 //
-// `go test -race` is the ideal tool here, but it needs cgo and
-// a C compiler, which this repository's Windows toolchain does
-// not have. This test is the substitute: it does not prove the
-// absence of a race, but a concurrent map read/write in these
-// paths panics with "concurrent map ..." under the runtime's
-// own map guard even without the race detector, so a broken
-// lock here still fails the build.
+// `go test -race` is the tool for this. It needs cgo and a C
+// compiler; on Windows the toolchain here finds one under
+// msys64 (ucrt64\bin\gcc.exe), so the race detector does run.
+// The test is still worth keeping as a plain test: it asserts
+// the queue drains and the waiters clear, which the race
+// detector does not check.
 func TestUIApproval_ConcurrentDecisionsAndReads(t *testing.T) {
 	hub := webui.NewHub()
-	h := NewUIApprovalHandler(hub, &bytes.Buffer{}, "http://x/")
+	// A sync buffer, not a bytes.Buffer: eight approvals write to
+	// the same writer at once, and a bytes.Buffer corrupts under
+	// concurrent writes even when the handler's own lock is in
+	// place.
+	out := &syncBuffer{}
+	h := NewUIApprovalHandler(hub, out, "http://x/")
 
 	const approvals = 8
 	var wg sync.WaitGroup

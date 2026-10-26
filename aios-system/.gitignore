@@ -3,6 +3,11 @@
 *.cover
 *.coverprofile
 
+# Local secrets. A .env file holds API keys, and a key that
+# reaches a commit is a key that has to be rotated.
+.env
+.env.*
+
 # Local test-run transcripts. These are console output written
 # during a local `go test` pass, not source. The .gitignore
 # patterns for *.out / *.cover do not cover a plain .txt, so
@@ -55,3 +60,8 @@ ls-ps1.ps1
 *.ps1
 !test-*.ps1
 !vet-fmt.ps1
+
+# The Windows installer. It is a *.ps1, so the rule above
+# would ignore it -- and an installer that is not in the
+# repository is an installer nobody can download.
+!install.ps1

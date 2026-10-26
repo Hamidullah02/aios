@@ -53,3 +53,27 @@ func buildTestAgentLoop(
 	verifier := NewCommandVerifier()
 	return bus, worker, verifier
 }
+
+// testBus returns a bus carrying the full production tool
+// set, with no policy and no audit log.
+//
+// It exists so a test can ask the bus what tools exist
+// without setting up a policy or an audit database. The
+// planner's tool list is derived from the bus, so a test that
+// wires the planner against the production set is testing the
+// same list production uses.
+func testBus(t *testing.T) *tools.Bus {
+	t.Helper()
+	askTool, err := ask.New(func(_ context.Context, q ask.Question) (ask.Answer, error) {
+		if len(q.Options) == 0 {
+			return ask.Answer{}, nil
+		}
+		return ask.Answer{QuestionID: q.ID, SelectedOption: q.Options[0].ID}, nil
+	}, nil)
+	if err != nil {
+		t.Fatalf("ask.New: %v", err)
+	}
+	return tools.New(tools.Config{
+		Tools: productionToolSet(askBusAdapter{tool: askTool}, nil),
+	})
+}

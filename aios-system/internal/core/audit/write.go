@@ -55,12 +55,14 @@ type PersistedRow struct {
 // Fail-closed: if any step fails, the function returns the error
 // and no row is written. The caller treats the error as a run block.
 func (l *Log) Write(r *Row) (*WriteResult, error) {
-	if l.db == nil {
-		return nil, errors.New("audit.Log: closed")
-	}
 	if r == nil {
 		return nil, errors.New("audit.Log: nil row")
 	}
+	db, err := l.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer l.dbMu.RUnlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -80,7 +82,7 @@ func (l *Log) Write(r *Row) (*WriteResult, error) {
 	// we have to roll back before the lookup, which can deadlock in
 	// single-connection drivers like modernc.org/sqlite.
 	if r.IdempotencyKey != "" {
-		existing, lookupErr := l.lookupByIdempotencyKey(r.IdempotencyKey)
+		existing, lookupErr := lookupByIdempotencyKey(db, r.IdempotencyKey)
 		if lookupErr == nil {
 			return &WriteResult{Row: r, Existing: existing}, ErrDuplicate
 		}
@@ -92,7 +94,7 @@ func (l *Log) Write(r *Row) (*WriteResult, error) {
 	// Read the previous chain hash and the next sequence number
 	// atomically. We use a transaction so the chain stays intact
 	// even under concurrent writers.
-	tx, err := l.db.Begin()
+	tx, err := db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("audit.Write: begin: %w", err)
 	}
@@ -155,7 +157,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		// query on the same DB will deadlock with single-connection
 		// drivers like modernc.org/sqlite.
 		_ = tx.Rollback()
-		existing, lookupErr := l.lookupByIdempotencyKey(r.IdempotencyKey)
+		existing, lookupErr := lookupByIdempotencyKey(db, r.IdempotencyKey)
 		if lookupErr == nil {
 			return &WriteResult{Row: r, Existing: existing}, ErrDuplicate
 		}
@@ -183,9 +185,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 }
 
 // lookupByIdempotencyKey reads a single persisted row.
-func (l *Log) lookupByIdempotencyKey(key string) (*PersistedRow, error) {
+//
+// The caller holds the handle's read lock, so the database is
+// guaranteed to still be open for the duration of the query.
+func lookupByIdempotencyKey(db *sql.DB, key string) (*PersistedRow, error) {
 	row := &PersistedRow{}
-	err := l.db.QueryRow(`
+	err := db.QueryRow(`
 SELECT sequence_number, row_id, task_id, step_id, kind, actor, risk_tier,
        approval_id, idempotency_key, payload, redacted_hash, content_hash,
        chain_hash, ts_ns

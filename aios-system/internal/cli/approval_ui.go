@@ -34,6 +34,14 @@ import (
 // approval at a time, so a single blocking Approve per request
 // is sufficient; a second concurrent request would be a
 // different design and is not pretended at here.
+//
+// The output is written under a lock even so. The handler is
+// shared, and the hub's resolver can be called from any HTTP
+// goroutine, so two notes can reach the writer at once. An
+// unsynchronised writer that receives two writes is a data
+// race on the writer itself -- bytes.Buffer corrupts, and a
+// terminal gets two half-lines. The lock also keeps one
+// approval's five lines from interleaving with another's.
 type UIApprovalHandler struct {
 	// Hub receives the pending request and the decision.
 	Hub *webui.Hub
@@ -48,13 +56,15 @@ type UIApprovalHandler struct {
 	// port with nothing on it.
 	URL string
 
-	mu      sync.Mutex
-	waits   map[string]chan bool
+	mu    sync.Mutex
+	waits map[string]chan bool
+	// outMu serialises writes to Out.
+	outMu sync.Mutex
 }
 
 var (
-	_ ApprovalHandler            = (*UIApprovalHandler)(nil)
-	_ webui.ApprovalResolver     = (*UIApprovalHandler)(nil)
+	_ ApprovalHandler        = (*UIApprovalHandler)(nil)
+	_ webui.ApprovalResolver = (*UIApprovalHandler)(nil)
 )
 
 // errUIApprovalTimeout is returned when no operator decides in
@@ -115,44 +125,68 @@ func (h *UIApprovalHandler) Approve(ctx context.Context, wfa *runtime.WaitingFor
 	}()
 
 	h.Hub.AddApproval(webui.PendingApproval{
-		ID:        wfa.ApprovalID,
-		TaskID:    payload.RequesterID,
-		Action:    payload.Action,
-		Target:    payload.Target,
-		Reason:    payload.Reason,
-		Actor:     payload.RequesterID,
-		RiskTier:  payload.RiskTier,
+		ID:       wfa.ApprovalID,
+		TaskID:   payload.RequesterID,
+		Action:   payload.Action,
+		Target:   payload.Target,
+		Reason:   payload.Reason,
+		Actor:    payload.RequesterID,
+		RiskTier: payload.RiskTier,
 	})
 
-	fmt.Fprintf(h.Out, "\nAPPROVAL REQUIRED (decide in the web UI)\n")
-	fmt.Fprintf(h.Out, "  id     : %s\n", wfa.ApprovalID)
-	if payload.Action != "" {
-		fmt.Fprintf(h.Out, "  action : %s\n", payload.Action)
-	}
-	if payload.Target != "" {
-		fmt.Fprintf(h.Out, "  target : %s\n", payload.Target)
-	}
-	if payload.Reason != "" {
-		fmt.Fprintf(h.Out, "  reason : %s\n", payload.Reason)
-	}
-	fmt.Fprintf(h.Out, "  open   : %s\n", h.URL)
+	// The prompt is written as one block under the lock. A
+	// lock per line would still interleave two approvals'
+	// lines with each other; the point is that one approval's
+	// prompt reads as one prompt.
+	h.write(func(w io.Writer) {
+		fmt.Fprintf(w, "\nAPPROVAL REQUIRED (decide in the web UI)\n")
+		fmt.Fprintf(w, "  id     : %s\n", wfa.ApprovalID)
+		if payload.Action != "" {
+			fmt.Fprintf(w, "  action : %s\n", payload.Action)
+		}
+		if payload.Target != "" {
+			fmt.Fprintf(w, "  target : %s\n", payload.Target)
+		}
+		if payload.Reason != "" {
+			fmt.Fprintf(w, "  reason : %s\n", payload.Reason)
+		}
+		fmt.Fprintf(w, "  open   : %s\n", h.URL)
+	})
 
 	timer := time.NewTimer(uiApprovalWait)
 	defer timer.Stop()
 
 	select {
 	case approved := <-ch:
-		if approved {
-			fmt.Fprintf(h.Out, "approved in the UI: %s\n", wfa.ApprovalID)
-		} else {
-			fmt.Fprintf(h.Out, "denied in the UI: %s\n", wfa.ApprovalID)
-		}
+		h.write(func(w io.Writer) {
+			if approved {
+				fmt.Fprintf(w, "approved in the UI: %s\n", wfa.ApprovalID)
+			} else {
+				fmt.Fprintf(w, "denied in the UI: %s\n", wfa.ApprovalID)
+			}
+		})
 		return approved, nil
 	case <-ctx.Done():
 		return false, ctx.Err()
 	case <-timer.C:
 		return false, errUIApprovalTimeout
 	}
+}
+
+// write runs fn against Out under the output lock.
+//
+// The lock is what makes the handler safe to share. The resolver
+// is called from an HTTP goroutine and the run calls Approve from
+// its own, so two notes can reach Out at the same moment. An
+// unsynchronised write is a data race on the writer itself: a
+// bytes.Buffer corrupts, and a terminal shows two half-lines.
+func (h *UIApprovalHandler) write(fn func(io.Writer)) {
+	if h == nil || h.Out == nil {
+		return
+	}
+	h.outMu.Lock()
+	defer h.outMu.Unlock()
+	fn(h.Out)
 }
 
 // Resolve implements webui.ApprovalResolver: the browser's
@@ -181,4 +215,3 @@ func (h *UIApprovalHandler) Resolve(id string, approve bool) (string, error) {
 	}
 	return "denied", nil
 }
-

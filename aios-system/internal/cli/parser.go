@@ -72,6 +72,19 @@ type Args struct {
 	ConfigPath string
 	LogPath    string
 	Workspace  string // tool-bus workspace root; default = dirname of ConfigPath
+	// StateDir is where the tool's own files live: the
+	// policy, the price table, the egress list.
+	//
+	// It is separate from Workspace because the two answer
+	// different questions. Workspace is "where the agent may
+	// write" -- the operator's own directory, so a file the
+	// agent creates lands next to them. StateDir is "where the
+	// tool keeps its configuration" -- the var/ subdirectory,
+	// so the operator's project is not littered with the
+	// agent's bookkeeping.
+	//
+	// It is empty unless the first-run bootstrap set it.
+	StateDir string
 
 	// Subcommand-specific fields. The handler picks what it
 	// needs; the others stay at their zero value.
@@ -112,6 +125,14 @@ type Args struct {
 	// appropriate when the operator is deliberately testing
 	// the tools against the network.
 	EgressMode string
+	// IsolationMode is the namespace isolation mode for the run.
+	//
+	// The default is IsolationModeAuto: the namespaces are used
+	// when the platform and the kernel support them, and the
+	// runner falls back to the weaker containment when they do
+	// not. IsolationModeNamespaces requires them and fails
+	// without them.
+	IsolationMode string
 }
 
 // Parse parses argv into Args. argv[0] is the program name
@@ -143,6 +164,15 @@ type Args struct {
 // path instead of reconstructing it.
 const DefaultLogPath = "./var/aios.db"
 
+// DefaultConfigPath is the default location of the config file.
+//
+// It is a constant for the same reason DefaultLogPath is: the
+// first-run bootstrap has to be able to tell "the operator did
+// not pass --config" from "the operator passed --config with
+// the default value". Writing the default down in two places
+// is how the log path ended up with two disagreeing defaults.
+const DefaultConfigPath = "./var/config.yaml"
+
 // Parse turns argv into an *Args. The function writes usage
 // and parse errors to w and returns them as errors. An
 // equivalent.
@@ -162,13 +192,14 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
 	fs.BoolVar(&a.Debug, "debug", false, "print the full error traceback on failure")
-	fs.StringVar(&a.ConfigPath, "config", "./var/config.yaml", "path to the config file")
+	fs.StringVar(&a.ConfigPath, "config", DefaultConfigPath, "path to the config file")
 	fs.StringVar(&a.LogPath, "log", DefaultLogPath, "path to the audit log database")
 	fs.StringVar(&a.Workspace, "workspace", "", "tool-bus workspace root; default = dirname of --config")
 	fs.StringVar(&a.SocketPath, "socket", DefaultSocketPath(), "approval daemon socket path")
 	fs.BoolVar(&a.AssumeYes, "yes", false, "auto-approve gated tool calls instead of prompting (no human sees each request)")
 	fs.StringVar(&a.DaemonPID, "pidfile", "./var/aios-daemon.pid", "path to the daemon pid file")
 	fs.StringVar(&a.EgressMode, "egress", EgressModeProxy, "network enforcement for subprocesses: proxy (allow-list enforced), deny (no network), off (no policy)")
+	fs.StringVar(&a.IsolationMode, "isolation", IsolationModeAuto, "process isolation for subprocesses: auto (namespaces when supported), namespaces (require them), none (containment only)")
 	// --format and --tail are subcommand-specific and
 	// registered on the per-subcommand FlagSet.
 
@@ -176,9 +207,10 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	// subcommand. The convention is:
 	//   aios [--debug] [--config=...] <subcommand> [sub-flags] [args...]
 	//
-	// To support both we look for the subcommand first, then
-	// parse the globals from the prefix and the subcommand-
-	// specific flags from the suffix.
+	// To support both we look for the subcommand first, take
+	// the global flags out of BOTH sides of it, and parse them
+	// in one pass. The subcommand's own flag set then sees
+	// only the flags it declares.
 	idx := findSubcommandIndex(argv[1:])
 	if idx < 0 {
 		// No subcommand. Maybe the user asked for --help.
@@ -193,23 +225,44 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	}
 	// Split argv into [pre, sub, post].
 	pre := append([]string(nil), argv[1:1+idx]...)
-	rest := append([]string(nil), argv[1+idx:]...)
-	a.Command = rest[0]
-	rest = rest[1:]
+	rest := append([]string(nil), argv[1+idx+1:]...)
+	a.Command = argv[1+idx]
 
-	// Parse the global flags from the prefix. We use a fresh
-	// FlagSet so the help text only shows the globals.
-	if err := fs.Parse(pre); err != nil {
+	// The globals that FOLLOW the subcommand belong to the
+	// global flag set, not to the subcommand's.
+	//
+	// They used to be handed to the subcommand's flag set,
+	// which only knows the flags that subcommand declares, so
+	// every global written after the subcommand was rejected:
+	//
+	//	aios approve <id> --socket=path
+	//	aios daemon start --socket=path --pidfile=path
+	//
+	// failed with "flag provided but not defined: -socket".
+	// The second one is the invocation the tool's own help
+	// text advertises.
+	afterSub, subArgs := splitGlobalFlags(rest, fs)
+
+	// Parse the global flags from both positions. We use a
+	// fresh FlagSet so the help text only shows the globals.
+	// The list is hoisted first so a stray positional cannot
+	// stop the flag package before it has seen the globals
+	// that come after it.
+	globalArgs := hoistFlags(append(pre, afterSub...), valueFlagNames(fs))
+	if err := fs.Parse(globalArgs); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			printHelp(w)
 			return a, errHelp
 		}
 		return nil, &CliError{Kind: "user", What: err.Error(), Cause: err}
 	}
+
 	// Record whether the operator named --socket themselves.
 	// The flag set distinguishes "left at the default" from
 	// "set to this value", and the approval strategy depends
-	// on the difference.
+	// on the difference: an operator who names a socket is
+	// asking for the daemon, one who never mentioned it is
+	// at a terminal.
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "socket" {
 			a.SocketExplicit = true
@@ -228,7 +281,7 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 		// --plan-out overrides.
 		sub.StringVar(&a.Model, "model", "", "model id override (default: planner picks)")
 		sub.StringVar(&a.PlanOut, "plan-out", "", "path to write the planner's plan YAML; empty = do not persist")
-		sub.BoolVar(&a.AssumeYes, "yes", false, "auto-approve gated tool calls instead of prompting")
+		subYesFlag(sub, a)
 	case CmdRun:
 		sub.StringVar(&a.PlanPath, "plan", "", "path to the plan YAML file")
 		// v0.41.1: --web serves the UI from THIS process, so
@@ -237,11 +290,11 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 		// still works but only shows history.
 		sub.BoolVar(&a.WebLive, "web", false, "also serve the operator UI while the plan runs (see --web-addr)")
 		sub.StringVar(&a.WebAddr, "web-addr", "", "listen address for --web (default: "+webui.DefaultAddr+")")
-		sub.BoolVar(&a.AssumeYes, "yes", false, "auto-approve gated tool calls instead of prompting")
+		subYesFlag(sub, a)
 	case CmdResume:
 		sub.StringVar(&a.PlanPath, "plan", "", "path to the original plan YAML file")
 		sub.StringVar(&a.TaskID, "task", "", "task id to resume")
-		sub.BoolVar(&a.AssumeYes, "yes", false, "auto-approve gated tool calls instead of prompting")
+		subYesFlag(sub, a)
 	case CmdCancel:
 		sub.StringVar(&a.TaskID, "task", "", "task id to cancel")
 	case CmdReport:
@@ -264,15 +317,15 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	case CmdDaemon:
 		// The daemon command takes start or stop as a
 		// positional arg, not as a flag.
-		if len(rest) == 0 {
+		if len(subArgs) == 0 {
 			return nil, &CliError{Kind: "user", What: "`daemon` requires `start` or `stop`"}
 		}
-		a.Subcommand = rest[0]
-		rest = rest[1:]
+		a.Subcommand = subArgs[0]
+		subArgs = subArgs[1:]
 	default:
 		return nil, &CliError{Kind: "user", What: fmt.Sprintf("unknown subcommand %q", a.Command)}
 	}
-	if err := sub.Parse(hoistFlags(rest, valueFlagNames(sub))); err != nil {
+	if err := sub.Parse(hoistFlags(subArgs, valueFlagNames(sub))); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			printSubHelp(w, a.Command, sub)
 			return a, errHelp
@@ -435,6 +488,102 @@ func hoistFlags(args []string, valueFlags map[string]bool) []string {
 	out = append(out, flags...)
 	out = append(out, positional...)
 	return out
+}
+
+// splitGlobalFlags separates the global flags that appear
+// after the subcommand from the subcommand's own arguments.
+//
+// The globals belong to the outer flag set, so they have to be
+// parsed there; anything else belongs to the subcommand. A
+// global written after the subcommand used to be handed to the
+// subcommand's flag set, which only knows that subcommand's
+// flags, so it was rejected with "flag provided but not
+// defined".
+//
+// The two returned slices keep the order they had in argv, so
+// "approve <id> --socket=path" still yields the id as the
+// first positional.
+//
+// A "--" ends the global section: everything after it is the
+// subcommand's, whatever it looks like.
+func splitGlobalFlags(args []string, globals *flag.FlagSet) (global, sub []string) {
+	if globals == nil {
+		return nil, args
+	}
+	names := map[string]bool{}
+	globals.VisitAll(func(f *flag.Flag) { names[f.Name] = true })
+
+	global = []string{}
+	sub = []string{}
+	expectValue := false
+	endOfFlags := false
+	for _, arg := range args {
+		if endOfFlags {
+			sub = append(sub, arg)
+			continue
+		}
+		if arg == "--" {
+			endOfFlags = true
+			sub = append(sub, arg)
+			continue
+		}
+		if expectValue {
+			expectValue = false
+			global = append(global, arg)
+			continue
+		}
+		if len(arg) > 1 && strings.HasPrefix(arg, "-") {
+			name := strings.TrimLeft(arg, "-")
+			if idx := strings.Index(name, "="); idx >= 0 {
+				name = name[:idx]
+			}
+			if names[name] {
+				global = append(global, arg)
+				// "--socket=path" carries its own value; only
+				// the bare "--socket" form consumes the next
+				// argument.
+				if !strings.Contains(arg, "=") && !isBoolFlag(globals, name) {
+					expectValue = true
+				}
+				continue
+			}
+			sub = append(sub, arg)
+			continue
+		}
+		sub = append(sub, arg)
+	}
+	return global, sub
+}
+
+// isBoolFlag reports whether the named flag takes no value.
+func isBoolFlag(fs *flag.FlagSet, name string) bool {
+	f := fs.Lookup(name)
+	if f == nil {
+		return false
+	}
+	bf, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return ok && bf.IsBoolFlag()
+}
+
+// subYesFlag registers the subcommand's --yes flag without
+// resetting a value the global flag set already parsed.
+//
+// The flag package's BoolVar writes the default into the
+// target immediately, so registering "yes" on the
+// subcommand's flag set reset a.AssumeYes to false AFTER the
+// global prefix had set it to true:
+//
+//	aios --yes run plan.yaml
+//
+// asked the operator anyway, and then waited a minute for an
+// answer nobody was there to give. The flag that says "no
+// human will decide each request" did not stop the human
+// prompt.
+//
+// The default passed to BoolVar is the value the field already
+// holds, so registering the flag cannot undo a parsed one.
+func subYesFlag(sub *flag.FlagSet, a *Args) {
+	sub.BoolVar(&a.AssumeYes, "yes", a.AssumeYes, "auto-approve gated tool calls instead of prompting")
 }
 
 // valueFlagNames returns the names of the flags in fs that

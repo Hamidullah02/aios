@@ -241,6 +241,16 @@ func (d *DaemonApprovalHandler) Approve(ctx context.Context, wfa *runtime.Waitin
 	if id == "" {
 		id = wfa.ApprovalID
 	}
+	// Announce the id BEFORE waiting. The operator has to know
+	// which id to act on, and the wait below blocks until
+	// somebody decides -- so if the id were only printed after
+	// the decision, the operator would have no way to find it.
+	// This is the line that names the approval a second
+	// terminal can approve.
+	if d.Out != nil {
+		fmt.Fprintf(d.Out, "approval %s: waiting for a decision (approve it with `aios approve %s`)\n", id, id)
+	}
+
 	// The daemon's "wait" BLOCKS until a human grants or
 	// denies, and the response that comes back is the
 	// terminal state -- so this is the response that matters.

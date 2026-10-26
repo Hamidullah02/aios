@@ -60,11 +60,26 @@ func (w WriteTool) remember(args map[string]any, ctx tools.Context) (tools.Resul
 	}
 
 	kind := memory.ArtifactKind(stringArg(args, "kind"))
-	if kind == "" {
+	if !kind.IsValid() {
+		// An unknown kind is a near-miss, not a reason to
+		// refuse the memory.
+		//
+		// The model was asked to remember a fact and wrote
+		// kind "fact", which is not one of the six kinds the
+		// memory knows. The tool answered "kind must be one
+		// of task, file, decision, observation, tool_result,
+		// model_output; got \"fact\"" and the whole task
+		// failed. The agent understood what it wanted to
+		// remember; the kind was a label, and an observation
+		// is what it actually was.
+		//
+		// An empty kind is a plain default. An unknown one
+		// is the model's near-miss, and observation is the
+		// kind that means "the agent noticed something".
 		kind = memory.KindObservation
 	}
 	scope := memory.Scope(stringArg(args, "scope"))
-	if scope == "" {
+	if !scope.IsValid() {
 		scope = memory.ScopeProject
 	}
 	sessionID := stringArg(args, "session_id")

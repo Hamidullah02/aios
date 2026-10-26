@@ -8,6 +8,21 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#9679;</text></svg>">
 </head>
 <body>
+<!-- The task bar is the product's front door. It sits above
+     every panel and above the fold, and it asks one question
+     in the operator's own language: what do you want done? -->
+<section class="ask" id="ask">
+  <form class="ask-form" id="ask-form">
+    <label class="ask-label" for="ask-input">What do you want done?</label>
+    <div class="ask-row">
+      <input id="ask-input" type="text" autocomplete="off" spellcheck="true"
+             placeholder="e.g. summarise the sales numbers in reports/q3.csv">
+      <button class="btn primary" type="submit" id="ask-submit">Start</button>
+    </div>
+    <p class="ask-note" id="ask-note"></p>
+  </form>
+</section>
+
 <header class="topbar">
   <h1 class="brand">aios</h1>
   <div class="status" id="conn" data-state="connecting">connecting</div>
@@ -47,14 +62,38 @@
        layout editor can find it. -->
 </main>
 
+<template id="panel-tasks">
+  <section class="panel" data-panel="tasks">
+    <header class="panel-head">
+      <h2>Your tasks</h2>
+      <span class="count" data-role="count"></span>
+    </header>
+    <div class="panel-body tasks" data-role="body">
+      <p class="empty">Nothing asked for yet.</p>
+    </div>
+  </section>
+</template>
+
+<template id="task-card">
+  <article class="task" data-status="planning">
+    <header>
+      <span class="dot"></span>
+      <span class="task-goal"></span>
+    </header>
+    <ol class="task-steps"></ol>
+    <p class="task-detail"></p>
+    <p class="task-result"></p>
+  </article>
+</template>
+
 <template id="panel-agents">
   <section class="panel" data-panel="agents">
     <header class="panel-head">
-      <h2>Agents</h2>
+      <h2>Working</h2>
       <span class="count" data-role="count"></span>
     </header>
     <div class="panel-body agent-grid" data-role="body">
-      <p class="empty">No agents yet.</p>
+      <p class="empty">Nothing running yet.</p>
     </div>
   </section>
 </template>
@@ -62,11 +101,11 @@
 <template id="panel-approvals">
   <section class="panel" data-panel="approvals">
     <header class="panel-head">
-      <h2>Approvals</h2>
+      <h2>Needs your OK</h2>
       <span class="count" data-role="count"></span>
     </header>
     <div class="panel-body approvals" data-role="body">
-      <p class="empty">Nothing waiting for approval.</p>
+      <p class="empty">Nothing waiting for you.</p>
     </div>
   </section>
 </template>
@@ -81,7 +120,7 @@
     <p class="approval-reason"></p>
     <div class="approval-actions">
       <button class="btn primary" type="button" data-role="approve">Allow once</button>
-      <button class="btn danger" type="button" data-role="deny">Deny</button>
+      <button class="btn danger" type="button" data-role="deny">Don't allow</button>
     </div>
     <p class="approval-note"></p>
   </article>
@@ -90,7 +129,7 @@
 <template id="panel-comms">
   <section class="panel" data-panel="comms">
     <header class="panel-head">
-      <h2>Agent communication</h2>
+      <h2>Messages</h2>
       <span class="count" data-role="count"></span>
     </header>
     <div class="panel-body comms" data-role="body">

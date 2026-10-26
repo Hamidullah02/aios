@@ -6,28 +6,28 @@
       "id": "t1",
       "description": "read the existing main.go to find the routing setup",
       "tool": "read_file",
-      "inputs": ["cmd/aios/main.go"],
+      "inputs": ["path=cmd/aios/main.go"],
       "acceptance": "main.go contents returned; lines=120"
     },
     {
       "id": "t2",
       "description": "add a /health handler that returns 200 with {\"status\":\"ok\"}",
       "tool": "edit_file",
-      "inputs": ["cmd/aios/main.go"],
+      "inputs": ["path=cmd/aios/main.go"],
       "acceptance": "handler compiles; lines=14"
     },
     {
       "id": "t3",
       "description": "register the /health route on the existing mux",
       "tool": "edit_file",
-      "inputs": ["cmd/aios/main.go"],
+      "inputs": ["path=cmd/aios/main.go"],
       "acceptance": "route registered; lines=3"
     },
     {
       "id": "t4",
       "description": "run go test ./... and confirm green",
       "tool": "shell",
-      "inputs": ["go test ./..."],
+      "inputs": ["command=go,test,./..."],
       "acceptance": "tests pass; lines=0"
     }
   ],

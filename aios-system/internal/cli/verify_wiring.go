@@ -43,18 +43,28 @@ func wireVerifyTools(router *models.Router, auditLog *audit.Log) map[string]tool
 	// is go-test because the doc set's most common
 	// case is a Go project; the tool accepts an
 	// explicit `runner` arg to override.
+	//
+	// The sandbox is the LAZY default runner, not a fresh
+	// one. A fresh runner has no network policy, and the
+	// egress guard installs its policy on the process-wide
+	// default runner AFTER the tool set is built. Capturing
+	// the default here would capture the policy-less runner
+	// that existed before the guard started, so a test run
+	// would download its dependencies straight past the
+	// allow list.
 	runTests := &verify.RunTestsTool{
-		Sandbox:       sandbox.NewSubprocessRunner(),
+		Sandbox:       sandbox.LazyDefaultRunner{},
 		DefaultRunner: verify.RunnerGoTest,
 		Audit:         auditLog,
 	}
 	out["run_tests"] = runTests
 	// SelfCheckTool: only build when a router is
 	// available. The Judge adapter picks a model id
-	// (default gpt-4o) and calls router.Complete.
+	// (the same one the planner uses) and calls
+	// router.Complete.
 	if router != nil {
 		selfCheck, err := verify.NewSelfCheckTool(verify.SelfCheckConfig{
-			Judge: routerJudge{router: router, model: "gpt-4o"},
+			Judge: routerJudge{router: router, model: resolveModel("")},
 			Audit: auditLog,
 		})
 		if err != nil {
@@ -76,7 +86,7 @@ func wireVerifyTools(router *models.Router, auditLog *audit.Log) map[string]tool
 
 // routerJudge adapts a *models.Router to the
 // verify.Judge interface. The adapter picks a model
-// id (configurable; default gpt-4o) and calls
+// id (configurable; the resolved default) and calls
 // router.Complete, returning the response text.
 //
 // The adapter lives here (not in verify) so verify
@@ -107,7 +117,7 @@ func wireSelfCheckOnly(router *models.Router, auditLog *audit.Log) tools.Tool {
 		return nil
 	}
 	selfCheck, err := verify.NewSelfCheckTool(verify.SelfCheckConfig{
-		Judge: routerJudge{router: router, model: "gpt-4o"},
+		Judge: routerJudge{router: router, model: resolveModel("")},
 		Audit: auditLog,
 	})
 	if err != nil {

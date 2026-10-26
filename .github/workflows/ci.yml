@@ -1,0 +1,122 @@
+# The gate every push goes through.
+#
+# Before this workflow existed, the only CI in this repository was
+# release.yml, and it ran on tags. That meant a change could sit on
+# a branch for weeks with nothing checking it, and the release job
+# was the first thing that ever ran the suite. The two data races
+# fixed in v0.47.0 lived in the egress proxy and the approval
+# handler for exactly that long: the plain test suite passed, so
+# nothing complained, and the race detector -- which would have
+# found both -- was never run.
+#
+# This workflow runs on every push and every pull request, and it
+# runs the race detector. That is the whole point of it.
+
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Vet
+        working-directory: aios-system
+        env:
+          CGO_ENABLED: "0"
+        run: go vet ./...
+
+      - name: Test
+        working-directory: aios-system
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./... -count=1
+
+  race:
+    name: race detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      # The race detector needs cgo, so it needs a C compiler. The
+      # runner has one (gcc is preinstalled on ubuntu-latest), so
+      # unlike the release job this one runs with CGO_ENABLED=1.
+      #
+      # The release job cannot do this: it must produce binaries
+      # that run without a C toolchain on the user's machine, which
+      # is why it builds with CGO_ENABLED=0. That is the right call
+      # for the shipped artifact and the wrong one for testing, so
+      # the two concerns are separate jobs.
+      - name: Race detector
+        working-directory: aios-system
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race ./... -count=1
+
+  cross-compile:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      # Every target the release workflow ships has to compile.
+      # A build tag that excludes one platform does not fail the
+      # host build, so the only way to know is to build for the
+      # target: v0.46.0 shipped a release that did not compile on
+      # Linux at all, because nothing built for Linux before the
+      # release.
+      - name: Build
+        working-directory: aios-system
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -o /dev/null ./cmd/aios
+
+      - name: Vet for this target
+        working-directory: aios-system
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go vet ./...

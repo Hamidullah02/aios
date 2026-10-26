@@ -17,6 +17,16 @@ type PromptData struct {
 	Tools    []ToolSpec
 	Errors   PlanErrorList
 	Previous string // the previous plan JSON, set on repair iterations
+	// Platform describes the machine the plan will run on.
+	//
+	// It is there because a model writing a shell command
+	// without it writes a Unix one: `ls`, `date`, `cat`,
+	// `echo`. On Windows those programs do not exist, so the
+	// plan fails with "exec: \"ls\": executable file not found
+	// in %PATH%" -- a failure that looks like a broken
+	// installer and is actually a plan written for the wrong
+	// operating system.
+	Platform string
 }
 
 // ToolSpec is the tool map entry the planner hands to the model.
@@ -50,6 +60,12 @@ Output rules:
 - Each task has: "id", "description", "tool" (optional, must be a
   registered tool name), "inputs" (array of strings, optional),
   "acceptance" (a testable statement).
+- "inputs" holds the tool's arguments as "key=value" strings, one
+  per entry, where each key is a property from that tool's input
+  schema. For a tool whose schema requires "path", the entry is
+  "path=notes.txt". Every required property in the schema must
+  appear. A bare value with no "key=" is not an argument and the
+  tool will reject the call.
 - For every edit-style tool call, the task description must call
   out a "lines_changed" estimate in the acceptance. The verifier
   uses this to enforce a 200-line diff-scope limit by default.
@@ -65,6 +81,18 @@ the same plan.`
 var planUserTmpl = template.Must(template.New("plan_user").Parse(planUserText))
 
 const planUserText = `Goal: {{.Goal}}
+
+{{- if .Platform}}
+
+Platform: {{.Platform}}
+The plan runs on this machine. Any shell command must exist on
+this platform. {{if eq .Platform "windows"}}On Windows use
+"dir" rather than "ls", "type" rather than "cat", and
+"date /t" rather than "date". PowerShell built-ins
+(Get-ChildItem, Get-Content) are available as
+"powershell -Command".{{else}}Unix commands like "ls", "cat",
+and "date" are available as written.{{end}}
+{{- end}}
 
 {{- if .Context}}
 
@@ -93,6 +121,18 @@ var planRepairTmpl = template.Must(template.New("plan_repair").Parse(planRepairT
 const planRepairText = `The previous plan failed verification. Produce a fixed plan.
 
 Goal: {{.Goal}}
+
+{{- if .Platform}}
+
+Platform: {{.Platform}}
+The plan runs on this machine. Any shell command must exist on
+this platform. {{if eq .Platform "windows"}}On Windows use
+"dir" rather than "ls", "type" rather than "cat", and
+"date /t" rather than "date". PowerShell built-ins
+(Get-ChildItem, Get-Content) are available as
+"powershell -Command".{{else}}Unix commands like "ls", "cat",
+and "date" are available as written.{{end}}
+{{- end}}
 
 {{- if .Context}}
 

@@ -74,6 +74,14 @@ func buildRouter(workspace string) (*models.Router, *models.PriceTable, *egress.
 	// init scaffold historically wrote a list-shaped file.
 	// If the loader returns an empty table, fall back to
 	// the default.
+	//
+	// The OpenRouter models are ALWAYS added, not only on
+	// the fallback path. A workspace with a prices.yaml
+	// that names only gpt-4o would otherwise have no price
+	// for the default model, and the router treats a model
+	// with no price as a configuration error and refuses the
+	// call: "price not found for model id". An operator
+	// would have to edit a file to run the product.
 	prices, _ := models.LoadPriceTable(pricesPath)
 	if prices == nil || priceTableEmpty(prices) {
 		prices = models.NewPriceTable([]models.Price{
@@ -81,10 +89,16 @@ func buildRouter(workspace string) (*models.Router, *models.PriceTable, *egress.
 			{Model: "claude-sonnet-4-5", InputPer1K: 0.003, OutputPer1K: 0.015},
 		}, nil)
 	}
+	prices = withDefaultPrices(prices, defaultOpenRouterPrices)
 
 	// Capability registry. Built-in default is the two
 	// models above. If var/capabilities.yaml is present
 	// and parses, use it; otherwise fall back.
+	//
+	// The OpenRouter models are added here for the same
+	// reason as the prices: the registry is what says
+	// which adapter a model id routes to, and a model
+	// that is not in it cannot be called at all.
 	registry, _ := models.LoadRegistry(capPath)
 	if registry == nil {
 		registry, _ = models.NewRegistry([]models.Capability{
@@ -92,30 +106,73 @@ func buildRouter(workspace string) (*models.Router, *models.PriceTable, *egress.
 			{Model: "claude-sonnet-4-5", Provider: "anthropic", ContextWindow: 200000, SupportsTools: true},
 		})
 	}
+	for _, cap := range defaultOpenRouterModels {
+		// A capability the workspace already names wins: the
+		// operator's file is more specific than ours.
+		if _, err := registry.Get(cap.Model); err == nil {
+			continue
+		}
+		_ = registry.Set(cap)
+	}
 
-	// Construct the router with both adapters. The
+	// Construct the router with the adapters. The
 	// adapters read the env vars at call time; an
 	// empty key is allowed here and surfaces as a
 	// clear "OPENAI_API_KEY is not set" error when
 	// the planner calls Complete.
 	adapters := map[string]models.Adapter{
-		"openai":    models.NewOpenAI(models.OpenAIConfig{}),
-		"anthropic": models.NewAnthropic(models.AnthropicConfig{}),
+		"openai":     models.NewOpenAI(models.OpenAIConfig{}),
+		"anthropic":  models.NewAnthropic(models.AnthropicConfig{}),
+		"openrouter": models.NewOpenRouter(models.OpenRouterConfig{}),
 	}
 	router := models.NewRouter(adapters, registry, prices)
 	return router, prices, allowList, nil
+}
+
+// withDefaultPrices adds the default prices to a table that
+// does not already carry them.
+//
+// The defaults are added as BASE entries, not as overrides: an
+// operator's workspace price for one of these models is more
+// specific than ours, and it must win. The price table's Has
+// method is what tells the two apart -- asking Cost would not,
+// because a free model's zero cost and a missing model's zero
+// cost are the same number.
+//
+// The table is returned unchanged when it already has every
+// default, so the common case allocates nothing.
+func withDefaultPrices(table *models.PriceTable, defaults []models.Price) *models.PriceTable {
+	if table == nil {
+		table = models.NewPriceTable(nil, nil)
+	}
+	missing := make([]models.Price, 0, len(defaults))
+	for _, p := range defaults {
+		if table.Has(p.Model) {
+			continue
+		}
+		missing = append(missing, p)
+	}
+	if len(missing) == 0 {
+		return table
+	}
+	return table.WithDefaults(missing)
 }
 
 // priceTableEmpty reports whether the table has any
 // entries. Used to detect the case where the init
 // scaffold wrote a list-shaped file but the loader
 // expects a map-shaped file.
+//
+// The count is the table's own, not a probe call. A probe
+// with a sentinel model asks whether the table prices
+// THAT model, which is never true, so it reported every
+// table as empty -- and the caller then replaced the
+// operator's prices.yaml with the built-in list.
 func priceTableEmpty(t *models.PriceTable) bool {
-	// Cost() returns ErrPriceNotFound when the model
-	// is not in either layer. Probe with a known
-	// sentinel.
-	_, err := t.Cost("__sentinel__", 0, 0)
-	return err != nil
+	if t == nil {
+		return true
+	}
+	return t.Len() == 0
 }
 
 // ensureWorkspace is a small helper that returns the

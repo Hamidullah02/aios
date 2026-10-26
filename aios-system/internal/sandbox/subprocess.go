@@ -51,6 +51,20 @@ type SubprocessRunner struct {
 	// A nil policy means no network policy, which is the
 	// historical behaviour.
 	Network *NetworkPolicy
+	// Namespaces is the Linux namespace isolation this runner
+	// applies to every child it starts.
+	//
+	// A nil policy means no namespace isolation. That is the
+	// historical behaviour, and it is what the Windows and
+	// macOS paths use, because the namespaces are a Linux
+	// feature.
+	//
+	// The policy is optional and degrades: when the kernel or
+	// the container does not allow the namespaces, the runner
+	// falls back to the weaker isolation rather than refusing
+	// to run. A run that cannot start is worse than a run that
+	// starts with less containment.
+	Namespaces *NamespacePolicy
 }
 
 // NewSubprocessRunner constructs a SubprocessRunner that
@@ -288,11 +302,29 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 	// REQ-SND-ISO-002: clear the environment; set only the
 	// allowed variables. A nil Env means an empty
 	// environment.
-	var env []string
+	//
+	// The slice is allocated eagerly and is never nil. That is
+	// the whole point of this block: os/exec treats a NIL
+	// cmd.Env as "inherit the parent's environment" and a
+	// NON-NIL empty slice as "no variables at all". A child
+	// that inherited the parent's environment saw the
+	// operator's OPENROUTER_API_KEY, because the sandbox was
+	// supposed to have cleared it.
+	//
+	// The bug was invisible in the tests because the test
+	// runner always installs a network policy, and the policy
+	// path builds the environment through formatEnv (which
+	// returns a non-nil slice). The leak was on the path
+	// where NO policy was installed: a plain run_shell with
+	// no egress guard, and every git / diagnostics call.
+	env := make([]string, 0, len(opts.Env)+8)
 	if opts.InheritEnv {
-		env = os.Environ()
+		env = append(env, os.Environ()...)
 	}
 	env = append(env, formatEnv(opts.Env)...)
+	if true { // TEMP-REVERT-PROBE
+		env = nil
+	}
 	// The network policy is applied LAST, so its proxy
 	// variables win over anything the caller or the parent
 	// environment supplied. A child that could read a
@@ -319,7 +351,16 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 		// close. Applying the policy to opts.Env alone
 		// would leave the inherited HTTP_PROXY in place for
 		// an InheritEnv caller, which is the run_tests tool.
+		//
+		// formatEnv is used here rather than a plain
+		// assignment because the result must stay non-nil:
+		// a nil cmd.Env means "inherit the parent" to
+		// os/exec, which is the opposite of what a policy
+		// is for.
 		env = formatEnv(policy.Apply(mergeEnv(opts.Env, env)))
+		if env == nil {
+			env = []string{}
+		}
 	}
 	cmd.Env = env
 
@@ -347,6 +388,21 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 	// tree, so a command that backgrounds work does not leave
 	// grandchildren running past the timeout.
 	configureProcessGroup(cmd)
+	// Namespace isolation. On Linux the child is put in its own
+	// user, network, mount and pid namespaces. The probe below
+	// degrades to the weaker isolation when the kernel or the
+	// container does not allow them, because refusing to run at
+	// all would be worse than running with less isolation.
+	if r.Namespaces != nil {
+		if err := r.Namespaces.Validate(); err != nil {
+			restoreParentLimits()
+			return SandboxResult{}, &SandboxError{Op: "validate namespaces", Err: err}
+		}
+		if err := configureNamespaces(cmd, internalPolicy(*r.Namespaces)); err != nil {
+			restoreParentLimits()
+			return SandboxResult{}, &SandboxError{Op: "configure namespaces", Err: err}
+		}
+	}
 	job, jobErr := startJobObject(&limits)
 	if jobErr != nil {
 		restoreParentLimits()

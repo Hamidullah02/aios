@@ -55,6 +55,7 @@ type Daemon struct {
 	pidPath    string
 	approvals  *approvals.Service
 	audit      *audit.Log
+	out        io.Writer
 	listener   net.Listener
 	mu         sync.Mutex
 	stopped    bool
@@ -67,6 +68,13 @@ type DaemonConfig struct {
 	PidPath    string
 	Approvals  *approvals.Service
 	Audit      *audit.Log
+	// Out receives the one line the daemon prints when it is
+	// ready. The daemon is a foreground service that blocks,
+	// so without this line the operator sees a command that
+	// looks hung and no sign that the socket is live. A
+	// service that starts silently is a service nobody
+	// trusts to have started.
+	Out io.Writer
 }
 
 // NewDaemon returns a daemon. The socket is bound on Start,
@@ -84,6 +92,7 @@ func NewDaemon(cfg DaemonConfig) *Daemon {
 		pidPath:    cfg.PidPath,
 		approvals:  cfg.Approvals,
 		audit:      cfg.Audit,
+		out:        cfg.Out,
 	}
 }
 
@@ -125,6 +134,18 @@ func (d *Daemon) Start(ctx context.Context) error {
 	d.listener = ln
 	d.stopped = false
 	d.mu.Unlock()
+
+	// Announce that the daemon is up, before the blocking accept
+	// loop. The socket exists at this point, so the line is a
+	// promise the daemon keeps: an operator who sees it can go
+	// and use `aios approve` straight away.
+	//
+	// Without this the command produces no output at all, and a
+	// foreground service that prints nothing is indistinguishable
+	// from one that hung before it started.
+	if d.out != nil {
+		fmt.Fprintf(d.out, "aios daemon: ready on %s\n", d.socketPath)
+	}
 
 	// Watch the pid file so `aios daemon stop` actually stops
 	// the daemon. Accept() blocks, so the check cannot live in
@@ -211,6 +232,7 @@ func (d *Daemon) watchPidFile(done <-chan struct{}) {
 		}
 	}
 }
+
 // Stop closes the listener. Idempotent.
 func (d *Daemon) Stop() error {
 	d.mu.Lock()
@@ -353,11 +375,28 @@ func (d *Daemon) handleDeny(ctx context.Context, id, actor string, _ map[string]
 	return map[string]any{"ok": true, "id": id, "state": "denied"}
 }
 
-func (d *Daemon) handleWait(_ context.Context, id string) map[string]any {
+// handleWait blocks until the approval reaches a terminal state
+// and then reports that state.
+//
+// It used to answer with the CURRENT state, which for a
+// just-created approval is "pending". The run that asked for
+// the wait read that back, saw a state that was not "granted",
+// and called it a denial -- so the run denied itself before any
+// operator had a chance to act:
+//
+//	approval ef0b7c74-...: pending
+//	error: approval: run: operator denied the action
+//
+// The blocking primitive already existed (approvals.Service.Wait
+// parks on the approval's done channel until a decision is
+// recorded); the daemon's wait verb just never used it. A
+// caller that waits on an approval that is already decided
+// still gets its answer immediately.
+func (d *Daemon) handleWait(ctx context.Context, id string) map[string]any {
 	if d.approvals == nil {
 		return map[string]any{"ok": false, "error": "approvals service is not configured"}
 	}
-	a, err := d.approvals.Get(id)
+	a, err := d.approvals.Wait(ctx, id)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}

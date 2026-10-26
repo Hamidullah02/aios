@@ -1,0 +1,174 @@
+# Builds the aios release binaries and attaches them to a
+# GitHub release.
+#
+# The point of this workflow is the install script. install.sh
+# and install.ps1 download a named asset from a release; this
+# workflow is what produces that asset. Without it the
+# installer has nothing to install.
+#
+# The binaries are built with CGO_ENABLED=0 so they run on any
+# machine of the same OS and CPU without a C toolchain. The
+# audit log uses the pure-Go modernc.org/sqlite driver, so
+# there is nothing to link against.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.42.0). Defaults to the current ref."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            goarch: amd64
+            asset: aios_linux_amd64
+          - os: linux
+            goarch: arm64
+            asset: aios_linux_arm64
+          - os: darwin
+            goarch: amd64
+            asset: aios_darwin_amd64
+          - os: darwin
+            goarch: arm64
+            asset: aios_darwin_arm64
+          - os: windows
+            goarch: amd64
+            asset: aios_windows_amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Test
+        # The release must not ship a binary that fails its own
+        # tests. The suite runs once, on the host, rather than
+        # per target: it has no network dependency and the
+        # targets differ only in the compiled binary.
+        working-directory: aios-system
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Race detector
+        # The shipped binaries are built with CGO_ENABLED=0, so
+        # the race detector cannot run against them. It can run
+        # against the same source with cgo enabled, and it has to
+        # run here as well as in the CI workflow: a tag can be
+        # pushed without a pull request ever having been opened,
+        # and this is the last check before a binary reaches a
+        # user.
+        #
+        # Two real data races were found this way in v0.47.0 --
+        # in the egress proxy and in the approval handler -- both
+        # in code the plain suite passed.
+        working-directory: aios-system
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race ./... -count=1
+
+      - name: Build
+        working-directory: aios-system
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags="-s -w" -o aios ./cmd/aios
+
+      - name: Package (tar.gz)
+        if: matrix.os != 'windows'
+        working-directory: aios-system
+        run: tar -czf "${{ matrix.asset }}.tar.gz" aios
+
+      - name: Package (zip)
+        if: matrix.os == 'windows'
+        working-directory: aios-system
+        run: zip "${{ matrix.asset }}.zip" aios
+
+      - name: Check the binary runs
+        if: matrix.os != 'windows'
+        working-directory: aios-system
+        run: ./aios --help
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write the release notes
+        run: |
+          cat > notes.md <<'EOF'
+          The aios CLI.
+
+          ## Install
+
+          macOS / Linux:
+
+          ```
+          curl -fsSL https://raw.githubusercontent.com/Hamidullah02/aios/main/install.sh | sh
+          ```
+
+          Windows (PowerShell):
+
+          ```
+          irm https://raw.githubusercontent.com/Hamidullah02/aios/main/install.ps1 | iex
+          ```
+
+          ## Start
+
+          Put your model key in a `.env` file in the directory you will
+          run `aios` from:
+
+          ```
+          OPENROUTER_API_KEY=sk-or-...
+          ```
+
+          Then:
+
+          ```
+          aios web
+          ```
+
+          The UI opens in your browser. Type what you want done.
+          EOF
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          # The installers go out with the release as well as living
+          # in the repository. A user who lands on the release page
+          # should not have to know that the script is in the source
+          # tree; the tag's own copy is the one that matches the
+          # binaries in this release.
+          cp install.sh install.ps1 dist/
+          gh release create "$TAG" dist/* \
+            --title "aios $TAG" \
+            --notes-file notes.md \
+            || gh release upload "$TAG" dist/* --clobber

@@ -124,7 +124,7 @@ func TestInit_ScaffoldedPolicyShellRuleWorks(t *testing.T) {
 		t.Fatal(err)
 	}
 	gw := policy.New(mustLoadPolicy(t, filepath.Join(dir, "policy.yaml")), nil)
-		d, err := gw.Decide(policy.Call{
+	d, err := gw.Decide(policy.Call{
 		TaskID: "t1",
 		Tool:   "run_shell",
 		Actor:  "bus-worker",

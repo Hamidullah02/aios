@@ -4,10 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 
 	"github.com/sadi/aios-system/internal/core/schemas"
 	"github.com/sadi/aios-system/internal/models"
 )
+
+// currentPlatform names the operating system the plan will run on.
+//
+// It is one of "windows", "darwin", or "linux".
+//
+// The planner needs it because a model writing a shell command
+// without it writes a Unix one -- `ls`, `cat`, `date` -- and on
+// Windows those programs do not exist. The plan then fails with
+// "exec: \"ls\": executable file not found in %PATH%", which an
+// operator reads as a broken installation rather than a plan
+// written for the wrong operating system.
+func currentPlatform() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "windows"
+	case "darwin":
+		return "darwin"
+	default:
+		return "linux"
+	}
+}
 
 // Planner turns a goal into a TaskPlan.
 //
@@ -113,9 +135,10 @@ func (p *Planner) Plan(ctx context.Context, goal string, planCtx map[string]any)
 
 	// Round 1: ask the model for a plan.
 	prompt := PromptData{
-		Goal:    goal,
-		Context: planCtx,
-		Tools:   tools,
+		Goal:     goal,
+		Context:  planCtx,
+		Tools:    tools,
+		Platform: currentPlatform(),
 	}
 	userPrompt, err := RenderUser(prompt)
 	if err != nil {
@@ -188,6 +211,7 @@ func (p *Planner) repair(
 			Tools:    tools,
 			Errors:   lastErrs,
 			Previous: previous,
+			Platform: currentPlatform(),
 		}
 		userPrompt, err := RenderRepair(prompt)
 		if err != nil {

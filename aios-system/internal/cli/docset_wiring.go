@@ -11,6 +11,86 @@ import (
 	"github.com/sadi/aios-system/internal/tools"
 )
 
+// productionToolSet returns the complete set of tools the
+// bus dispatches, keyed by canonical name.
+//
+// The set is assembled here, in one place, so the bus and the
+// planner can never disagree about which tools exist. Before
+// this function the tool map was assembled inline in
+// wireAgentLoop and the planner had a separate hand-written
+// copy of a fifth of it; the two drifted, and the tools that
+// were missing from the planner's copy were unreachable from
+// a plan.
+//
+// The ask tool is passed in because it needs a prompt
+// callback, which differs between production (stdin) and
+// tests (a fake).
+//
+// The memory tools are constructed here on a best-effort
+// basis: a workspace whose data directory is unwritable still
+// starts, and the memory tools return a typed error rather
+// than panicking. Failing the whole CLI over an unwritable
+// memory directory would make the problem strictly worse than
+// not having memory at all.
+func productionToolSet(askTool tools.Tool, auditLog *audit.Log) map[string]tools.Tool {
+	toolSet := map[string]tools.Tool{
+		"read_file":    tools.ReadFileTool{},
+		"search_files": tools.SearchFilesTool{},
+		"write_file":   tools.WriteFileTool{},
+		// run_shell gets NO explicit runner. The tool falls
+		// back to sandbox.DefaultRunner(), and the egress
+		// guard installs its network policy there.
+		//
+		// Passing a fresh runner here was the reason the
+		// egress allow list was not enforced: the tool held
+		// its own runner with no policy, so every command the
+		// agent ran reached the network directly. The proxy
+		// was running the whole time and had recorded nothing,
+		// because no request ever went through it.
+		"run_shell": tools.RunShellTool{},
+		"ask_user":  askTool,
+	}
+	// Verify-package tools. The RunTestsTool is always
+	// wired (no model dependency). SelfCheckTool needs a
+	// router and is registered later, in wirePlanner.
+	for name, tool := range wireVerifyTools(nil, auditLog) {
+		toolSet[name] = tool
+	}
+	// The rest of the doc-set tool set: the edit / git /
+	// search / image packages each ship a working
+	// tools.Tool implementation.
+	//
+	// Never shadow a tool that is already wired. The verify
+	// set wins on a name collision so a future rename in
+	// another package cannot silently change what run_tests
+	// resolves to.
+	for name, tool := range wireDocSetTools() {
+		if _, exists := toolSet[name]; exists {
+			continue
+		}
+		toolSet[name] = tool
+	}
+	// The memory adapters need a constructed *memory.Memory,
+	// and both tools share one instance so a write is visible
+	// to a read in the same process.
+	mem, err := memory.NewMemory(memory.MemoryConfig{})
+	if err != nil {
+		// Leave mem nil. wireMemoryTools still registers the
+		// two tools so `aios tools` shows them and a plan
+		// gets a clear "memory is not wired" error instead of
+		// ToolNotFoundError, which would send the operator
+		// looking for a policy problem.
+		mem = nil
+	}
+	for name, tool := range wireMemoryTools(mem, auditLog) {
+		if _, exists := toolSet[name]; exists {
+			continue
+		}
+		toolSet[name] = tool
+	}
+	return toolSet
+}
+
 // wireDocSetTools registers the doc-set tool set that
 // wireAgentLoop does not already wire.
 //

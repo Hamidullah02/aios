@@ -55,11 +55,11 @@ func runWeb(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	// that is blocked would find a panel that says nothing,
 	// which is worse than one that explains it cannot act.
 	var stopPoll chan struct{}
+	var daemonRes *DaemonApprovalResolver
 	if args.SocketPath != "" {
-		res := NewDaemonApprovalResolver(args.SocketPath, stderr)
-		hub.SetApprovalResolver(res)
+		daemonRes = NewDaemonApprovalResolver(args.SocketPath, stderr)
 		stopPoll = make(chan struct{})
-		go pollDaemonApprovals(res, hub, stopPoll, stderr)
+		go pollDaemonApprovals(daemonRes, hub, stopPoll, stderr)
 	}
 
 	srv, err := webui.New(webui.Config{Hub: hub, Addr: args.WebAddr})
@@ -85,6 +85,25 @@ func runWeb(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	}
 
 	url := srv.SessionURL()
+
+	// Let the operator give the product something to do.
+	//
+	// This is the difference between a dashboard and a
+	// product. Without it the browser can only watch runs that
+	// somebody else started; with it, one sentence in the
+	// browser becomes a plan and then a run, and the operator
+	// never touches a plan file, a policy file, or a terminal.
+	//
+	// The submitter is only built when the planner is wired. A
+	// server without one still serves the UI; it just says that
+	// tasks cannot be started here rather than offering a button
+	// that cannot work.
+	//
+	// This runs after the URL is known because the approval
+	// handler prints that URL to the operator who has to answer
+	// a gated request.
+	attachWebTaskSubmitter(hub, deps, daemonRes, stderr, url)
+
 	if args.WebOpen {
 		// --open reports the URL without serving. It exists
 		// so an operator can check what the command would do
@@ -97,7 +116,22 @@ func runWeb(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 
 	fmt.Fprintf(stdout, "aios web: serving %s\n", url)
 	fmt.Fprintf(stdout, "the link above carries this session's token; treat it as a credential.\n")
-	fmt.Fprintf(stdout, "press Ctrl-C to stop\n")
+	// Tell the operator what the first run created.
+	//
+	// A tool that silently writes four files into someone's
+	// project directory is a tool they will not trust the
+	// second time. Naming the files -- and saying where the
+	// agent will write -- is the difference between a setup
+	// step they understand and one they have to reverse-engineer.
+	if deps != nil && len(deps.FirstRunFiles) > 0 {
+		fmt.Fprintf(stdout, "\nfirst run: set up a workspace for this directory.\n")
+		for _, path := range deps.FirstRunFiles {
+			fmt.Fprintf(stdout, "  created %s\n", path)
+		}
+		fmt.Fprintf(stdout, "\nThe agent works in this directory. Its own settings are in var/.\n")
+		fmt.Fprintf(stdout, "Edit var/policy.yaml to change what it is allowed to do.\n")
+	}
+	fmt.Fprintf(stdout, "\npress Ctrl-C to stop\n")
 	if err := srv.Serve(ln); err != nil {
 		fmt.Fprintf(stderr, "error: system: %v\n", err)
 		return ExitSystemError

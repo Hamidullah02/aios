@@ -30,6 +30,15 @@ const nameAskTool = "ask_user"
 
 func (a askBusAdapter) Name() string { return a.tool.Name() }
 
+// Describe implements tools.Describer for the ask adapter.
+//
+// The adapter delegates to the ask package's own description
+// so the schema lives next to the code that decodes the
+// question, not in a second place that can drift from it.
+func (a askBusAdapter) Describe() (string, string) {
+	return a.tool.Describe()
+}
+
 func (a askBusAdapter) Run(args map[string]any, _ tools.Context) (tools.Result, error) {
 	res, err := a.tool.Run(context.Background(), args)
 	return tools.Result{

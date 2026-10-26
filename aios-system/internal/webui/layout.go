@@ -10,6 +10,16 @@ import (
 type PanelID string
 
 const (
+	// PanelTasks is the list of jobs the operator asked for from
+	// the browser, and what became of them.
+	//
+	// It is second in the default order. The composer that
+	// creates these tasks lives above the grid, outside it, so
+	// the entry point is always visible regardless of this
+	// ordering; what is in here is the history, and the
+	// history is less urgent than something blocked on a
+	// human.
+	PanelTasks PanelID = "tasks"
 	// PanelAgents is the multi-agent grid: one card per
 	// agent with its live status.
 	PanelAgents PanelID = "agents"
@@ -34,7 +44,7 @@ const (
 // than silently ignored, so a typo surfaces immediately
 // instead of producing a UI with a mysteriously missing
 // panel.
-var AllPanels = []PanelID{PanelApprovals, PanelAgents, PanelComms, PanelAudit}
+var AllPanels = []PanelID{PanelApprovals, PanelTasks, PanelAgents, PanelComms, PanelAudit}
 
 // KnownPanel reports whether id names a real panel.
 func KnownPanel(id PanelID) bool {
@@ -88,14 +98,15 @@ type Layout struct {
 // DefaultLayout returns the layout used before an operator
 // has customised anything: every panel visible, approvals
 // first because they are the only thing that can be blocked on
-// the operator.
+// the operator, then the task list.
 func DefaultLayout() Layout {
 	return Layout{
 		Panels: []PanelState{
 			{ID: PanelApprovals, Visible: true, Order: 0, Width: 12},
-			{ID: PanelAgents, Visible: true, Order: 1, Width: 12},
-			{ID: PanelComms, Visible: true, Order: 2, Width: 6},
-			{ID: PanelAudit, Visible: true, Order: 3, Width: 6},
+			{ID: PanelTasks, Visible: true, Order: 1, Width: 12},
+			{ID: PanelAgents, Visible: true, Order: 2, Width: 12},
+			{ID: PanelComms, Visible: true, Order: 3, Width: 6},
+			{ID: PanelAudit, Visible: true, Order: 4, Width: 6},
 		},
 	}
 }

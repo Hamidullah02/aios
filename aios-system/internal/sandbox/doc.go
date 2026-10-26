@@ -18,28 +18,48 @@
 //
 // # What this package is not
 //
-// This package is NOT a security boundary in the sense that a
-// container, a jail, or a VM is a security boundary. It does not
-// create a namespace, a container, a seccomp filter, or a
-// filesystem jail. A child it starts runs with the privileges of
-// the parent process, and a child that wants to reach the disk
-// outside its working directory can do so.
+// This package is NOT a container, and it is not a chroot. It
+// does not give the child a restricted filesystem view of its
+// own, and it does not install a seccomp filter or an LSM
+// policy. On Linux the mount namespace isolates the child's
+// mounts from the host's, but the child can still read the whole
+// filesystem it has permission to read.
 //
-// What it does provide is a set of restrictions that hold for a
-// child that cooperates with them:
+// # What this package does provide
+//
+// The package provides a set of restrictions that hold:
 //
 //   - The environment is cleared by default. The child gets the
 //     variables the caller listed, not the parent's environment.
 //   - Resource limits bound CPU, memory and process count on
-//     POSIX, and the wall-clock timeout bounds the run
+//     Linux, and the wall-clock timeout bounds the run
 //     everywhere.
 //   - The network policy rewrites the child's proxy variables and
 //     removes any that were inherited, so a well-behaved HTTP
 //     client can only reach the hosts the allow list names.
+//   - The process tree dies with the run. The child is in its
+//     own process group on POSIX, or its own Job Object on
+//     Windows, and the timeout kills the whole tree. A command
+//     that backgrounds work does not leave that work running.
+//   - On Linux the child runs in its own user, network, mount
+//     and pid namespaces. The user namespace maps the child's
+//     uid 0 onto an unprivileged uid on the host, and the
+//     network namespace gives the child an empty network stack.
 //
-// The word "sandbox" in the package name is aspirational. The
-// honest description is a restricted subprocess runner. Real
-// isolation -- Linux namespaces, bubblewrap, a container, or a
-// restricted token on Windows -- would be layered on top of this
-// package, not replaced by it.
+// # What the namespaces do not buy
+//
+// On Linux, a child in a user namespace is unprivileged with
+// respect to the host, but it is still root inside the namespace.
+// It can read every file the operator can read, and it has the
+// network namespace as its only network boundary. For a
+// hard guarantee, run the whole process inside a container.
+//
+// The Windows path is stronger than the Linux path in one
+// respect: the Job Object is a kernel-enforced boundary that a
+// descendant cannot escape by changing its parent.
+//
+// The word "sandbox" in the package name is a description of
+// intent, not a claim of equivalence with a container. Real
+// isolation -- a chroot, a container, a VM -- would be layered
+// on top of this package, not replaced by it.
 package sandbox

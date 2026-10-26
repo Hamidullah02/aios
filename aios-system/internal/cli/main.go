@@ -40,6 +40,15 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "cli: no arguments")
 		return ExitUserError
 	}
+	// Pick up a local .env before anything reads the
+	// environment. The adapters read their key at
+	// construction time, so this has to happen before
+	// BuildDeps wires the router.
+	//
+	// The config path is read out of argv directly rather
+	// than from the parsed args, because the search order
+	// depends on it and the parse has not happened yet.
+	loadDotEnv(configPathFromArgv(argv))
 	args, err := Parse(argv, stderr)
 	if err != nil {
 		if IsHelp(err) {
@@ -67,14 +76,28 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	}
 	deps.Stdout = stdout
 	deps.Stderr = stderr
-	if args.Command == CmdRun || args.Command == CmdFix || args.Command == CmdResume {
-		deps.Approval = newApprovalHandler(args, deps)
-		// The egress guard installs the network policy on the
-		// process-wide default runner. It has to be started
-		// before any tool can run a subprocess, which is why
-		// it is here rather than inside the subcommand
-		// handlers.
-		guard, err := StartEgressGuard(workspaceForArgs(args), deps.Audit, args.EgressMode)
+	// The egress guard installs the network policy on the
+	// process-wide default runner. It has to be started
+	// before any tool can run a subprocess, which is why
+	// it is here rather than inside the subcommand
+	// handlers.
+	//
+	// `web` is in this set, and it used not to be. That was
+	// the biggest hole in the product: the web UI is the
+	// path a non-coder uses, it runs the same tools through
+	// the same bus, and it was starting no guard at all. A
+	// task submitted from the browser could reach the
+	// network with no allow list and no isolation, while
+	// the same task submitted with `aios fix` could not.
+	//
+	// The guard is process-wide, and `web` is a long-lived
+	// process, so it has to be closed when the server stops.
+	// The deferred Close below does that.
+	if args.Command == CmdRun || args.Command == CmdFix || args.Command == CmdResume || args.Command == CmdWeb {
+		if args.Command != CmdWeb {
+			deps.Approval = newApprovalHandler(args, deps)
+		}
+		guard, err := StartGuard(stateDirForArgs(args), deps.Audit, args.EgressMode, args.IsolationMode)
 		if err != nil {
 			fmt.Fprint(stderr, DisplayError(err, args.Debug))
 			return ExitCodeFor(err)
@@ -96,16 +119,45 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 
 // workspaceForArgs returns the workspace directory for a run.
 //
-// The workspace is where var/egress.yaml lives, so the egress
-// guard needs the same directory the planner and the router
-// read. An explicit --workspace wins; otherwise the config
-// file's directory is the workspace.
+// The workspace is where the agent may write: the operator's own
+// directory, so a file the agent creates lands next to them.
+// An explicit --workspace wins; otherwise the config file's
+// directory is the workspace.
 func workspaceForArgs(args *Args) string {
 	if args == nil {
 		return "./var"
 	}
 	if args.Workspace != "" {
 		return ensureWorkspace(args.Workspace)
+	}
+	if args.ConfigPath != "" {
+		return ensureWorkspace(filepath.Dir(args.ConfigPath))
+	}
+	return ensureWorkspace("./var")
+}
+
+// stateDirForArgs returns the directory the tool's own files live
+// in: the policy, the price table, and the egress allow list.
+//
+// It is the var/ subdirectory, not the workspace. The two answer
+// different questions -- "where may the agent write" versus "where
+// is the tool configured" -- and conflating them is how the egress
+// guard ended up reading an egress.yaml that was not there.
+//
+// The guard reads this directory. When it read the workspace
+// instead, the allow list was always empty and the proxy denied
+// every host: the guard announced "allow list has 0 host rule(s)"
+// while var/egress.yaml sat right there with three entries in it.
+//
+// The first-run bootstrap sets StateDir explicitly. For every
+// other invocation the config file's directory is the state
+// directory, which is where `aios init` puts those files.
+func stateDirForArgs(args *Args) string {
+	if args == nil {
+		return ensureWorkspace("./var")
+	}
+	if args.StateDir != "" {
+		return ensureWorkspace(args.StateDir)
 	}
 	if args.ConfigPath != "" {
 		return ensureWorkspace(filepath.Dir(args.ConfigPath))
@@ -138,7 +190,7 @@ func RunCommand(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	case CmdAudit:
 		return runAudit(args, deps, stdout, stderr)
 	case CmdDaemon:
-		return runDaemon(ctx, args, deps, stderr)
+		return runDaemon(ctx, args, deps, stdout, stderr)
 	case CmdTools:
 		return runTools(args, deps, stdout, stderr)
 	case CmdWeb:
@@ -413,26 +465,14 @@ func runTools(args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	// working on a workspace with no config.yaml and no
 	// audit.db, which is exactly the situation where a
 	// user is trying to figure out what went wrong.
+	//
+	// The names come from the same function the bus is
+	// built from, so this listing cannot drift from what
+	// the agent can actually dispatch.
 	names := make([]string, 0)
-	// The doc-set set that needs no construction.
-	for name := range wireDocSetTools() {
+	for name := range productionToolSet(nil, nil) {
 		names = append(names, name)
 	}
-	// The memory adapters (v0.39.0). We pass a nil
-	// Memory because the listing only needs the tool
-	// names, and the tools themselves fail cleanly when
-	// the memory is not wired.
-	for name := range wireMemoryTools(nil, nil) {
-		names = append(names, name)
-	}
-	// The minimum five from wireAgentLoop plus the
-	// verify tools that always wire.
-	for name := range wireVerifyTools(nil, nil) {
-		names = append(names, name)
-	}
-	names = append(names,
-		"read_file", "search_files", "write_file", "run_shell", "ask_user",
-	)
 	sort.Strings(names)
 	for _, name := range names {
 		fmt.Fprintln(stdout, name)
@@ -505,12 +545,12 @@ func runFix(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Write
 	// the policy gateway, runs the tool, writes the
 	// audit row, and the verifier inspects the result.
 	report, err := runWithApprovals(ctx, plan, nil, ResumeDeps{
-		Audit:   deps.Audit,
-		Resume:  deps.Resume,
-		Worker:  deps.Worker,
-		Verify:  deps.Verifier,
-		Budget:   deps.Budget,
-		Approve:  deps.Approval,
+		Audit:      deps.Audit,
+		Resume:     deps.Resume,
+		Worker:     deps.Worker,
+		Verify:     deps.Verifier,
+		Budget:     deps.Budget,
+		Approve:    deps.Approval,
 		GrantStore: deps.Grants,
 	}, "fix")
 	if err != nil {
@@ -521,7 +561,7 @@ func runFix(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Write
 	return ExitOK
 }
 
-func runDaemon(ctx context.Context, args *Args, deps *Deps, stderr io.Writer) int {
+func runDaemon(ctx context.Context, args *Args, deps *Deps, stdout, stderr io.Writer) int {
 	switch args.Subcommand {
 	case DaemonStart:
 		if err := RunDaemonStart(ctx, DaemonConfig{
@@ -529,6 +569,7 @@ func runDaemon(ctx context.Context, args *Args, deps *Deps, stderr io.Writer) in
 			PidPath:    args.DaemonPID,
 			Approvals:  deps.Approvals,
 			Audit:      deps.Audit,
+			Out:        stdout,
 		}); err != nil {
 			fmt.Fprint(stderr, DisplayError(err, args.Debug))
 			return ExitCodeFor(err)
