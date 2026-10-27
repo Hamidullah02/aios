@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/core/schemas"
-	"github.com/sadi/aios-system/internal/models"
-	"github.com/sadi/aios-system/internal/runtime"
-	"github.com/sadi/aios-system/internal/webui"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/webui"
 )
 
 // WebTaskSubmitter turns an operator's plain-language goal into
@@ -209,7 +209,7 @@ func (s *WebTaskSubmitter) run(id, goal string) {
 	// The observer is the same bridge `aios run --web` uses, so
 	// a submitted task's steps appear as agent panels exactly
 	// like a plan run from the terminal.
-	report, runErr := s.execute(ctx, plan)
+	report, runErr := s.execute(ctx, id, plan)
 	if runErr != nil {
 		s.fail(store, id, describeRunError(runErr))
 		return
@@ -240,17 +240,71 @@ func (s *WebTaskSubmitter) run(id, goal string) {
 // grant store, the checkpointing, and the budget meter all behave
 // identically whether a plan came from a YAML file or from a
 // sentence in a browser.
-func (s *WebTaskSubmitter) execute(ctx context.Context, plan *schemas.TaskPlan) (*runtime.Report, error) {
+func (s *WebTaskSubmitter) execute(ctx context.Context, id string, plan *schemas.TaskPlan) (*runtime.Report, error) {
 	return runWithApprovals(ctx, plan, nil, ResumeDeps{
 		Audit:      s.Audit,
 		Resume:     s.Resume,
 		Worker:     s.Worker,
 		Verify:     s.Verify,
 		Budget:     s.Budget,
-		Approve:    s.Approval,
+		Approve:    &taskApprovalHandler{inner: s.Approval, store: s.Hub.TaskStore(), taskID: id},
 		GrantStore: s.Grants,
 		Observer:   webui.NewBridge(s.Hub),
 	}, "web task")
+}
+
+// taskApprovalHandler wraps the submitter's approval handler so
+// the task card says what is actually happening.
+//
+// The card said "working on it" for the whole run, including the
+// minutes the run spent waiting for a person to click Allow. That
+// is the one moment the operator most needs to see: the task
+// looks stuck, the agent panels say nothing useful, and the only
+// sign that the run needs them is the approval request in
+// another panel.
+//
+// The wrapper knows the task id, so it can move the card to
+// "blocked" while the request is outstanding and back to "running"
+// once the decision arrives. A denied request returns with an
+// error, and the card is left where the run puts it: failed.
+type taskApprovalHandler struct {
+	inner ApprovalHandler
+	store *webui.TaskStore
+	taskID string
+}
+
+// Approve implements ApprovalHandler.
+func (h *taskApprovalHandler) Approve(ctx context.Context, wfa *runtime.WaitingForApproval) (bool, error) {
+	if h == nil || h.inner == nil {
+		return false, errors.New("approval: no handler configured")
+	}
+	h.setBlocked(wfa)
+	approved, err := h.inner.Approve(ctx, wfa)
+	if err != nil {
+		// The decision failed (a timeout, a refused click). The
+		// run is about to fail the task, so the card is left for
+		// that to describe.
+		return approved, err
+	}
+	// The decision arrived. The run continues, so the card goes
+	// back to running.
+	if h.store != nil {
+		h.store.SetStatus(h.taskID, webui.TaskRunning, "working on it")
+	}
+	return approved, nil
+}
+
+// setBlocked moves the card to "waiting for you" and says what is
+// being asked for.
+func (h *taskApprovalHandler) setBlocked(wfa *runtime.WaitingForApproval) {
+	if h.store == nil {
+		return
+	}
+	detail := "waiting for your approval"
+	if payload, ok := approvalPayload(wfa); ok && payload.Action != "" {
+		detail = "waiting for your approval: " + payload.Action
+}
+	h.store.SetStatus(h.taskID, webui.TaskBlocked, detail)
 }
 
 // fail marks a task as failed with a detail the operator can act

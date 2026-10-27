@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sadi/aios-system/internal/sandbox"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/sandbox"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // GitBranchTool manages branches (REQ-GIT-BRH-001 to 004).

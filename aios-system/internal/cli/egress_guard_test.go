@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/egress"
-	"github.com/sadi/aios-system/internal/sandbox"
+	"github.com/Hamidullah02/aios/aios-system/internal/egress"
+	"github.com/Hamidullah02/aios/aios-system/internal/sandbox"
 )
 
 // writeEgressYAML writes an egress policy file into a

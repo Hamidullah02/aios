@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // Match is the typed content match (REQ-SRH-DAT-001).

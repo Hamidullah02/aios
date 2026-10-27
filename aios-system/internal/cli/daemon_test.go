@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/approvals"
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/core/clock"
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/approvals"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 func newTestAudit(t *testing.T) *audit.Log {

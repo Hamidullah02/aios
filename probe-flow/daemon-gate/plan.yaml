@@ -1,0 +1,9 @@
+id: probe-1
+goal: write a marker file using the shell
+tasks:
+  - id: t1
+    description: create marker.txt with the word shellran
+    acceptance: marker.txt contains shellran
+    tool: run_shell
+    inputs:
+      - command=cmd,/c,echo,shellran>marker.txt

@@ -1,8 +1,8 @@
 package runtime
 
 import (
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 // Tracer records every decision the orchestrator makes

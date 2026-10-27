@@ -3,8 +3,8 @@ package cli
 import (
 	"context"
 
-	"github.com/sadi/aios-system/internal/ask"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/ask"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // askBusAdapter exposes the ask.AskUserTool to the

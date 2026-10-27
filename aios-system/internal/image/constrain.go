@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sadi/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
 )
 
 // ModelCompleter is the call shape SchemaConstrainedCompletion

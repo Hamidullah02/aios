@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // bootstrapEligible reports whether a command should get the

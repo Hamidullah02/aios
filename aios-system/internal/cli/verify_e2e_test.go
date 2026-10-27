@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/policy"
-	"github.com/sadi/aios-system/internal/tools"
-	"github.com/sadi/aios-system/internal/verify"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/policy"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/verify"
 )
 
 // TestRunTests_EndToEnd exercises the verify-package

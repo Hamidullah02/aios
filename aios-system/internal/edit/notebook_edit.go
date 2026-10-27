@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // NotebookEditTool updates a Jupyter notebook cell

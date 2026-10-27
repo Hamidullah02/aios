@@ -26,7 +26,7 @@ needed and nothing to compile.
 From source instead:
 
 ```
-go install github.com/sadi/aios-system/cmd/aios@latest
+go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest
 ```
 
 ## Your model key

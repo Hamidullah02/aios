@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
 )
 
 // TestAuditCmd_UnknownTaskIDExplainsItself is the v0.40.0

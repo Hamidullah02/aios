@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 // Verifier is the protocol the planner uses to check a plan. The

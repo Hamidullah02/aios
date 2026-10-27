@@ -4,9 +4,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/sadi/aios-system/internal/ask"
-	"github.com/sadi/aios-system/internal/runtime"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/ask"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // BusWorker is a runtime.Worker that forwards each task to

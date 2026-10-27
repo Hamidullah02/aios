@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/core/schemas"
-	"github.com/sadi/aios-system/internal/models"
-	"github.com/sadi/aios-system/internal/planner"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/planner"
 )
 
 // TestPlannerCanPlanAGitTool is the end-to-end proof that

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
 )
 
 // newTestHistory constructs a SessionHistory backed by

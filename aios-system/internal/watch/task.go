@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/runtime"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // AgentType is the kind of sub-agent the Task tool spawns

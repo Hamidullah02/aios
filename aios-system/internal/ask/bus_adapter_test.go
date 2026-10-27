@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // askAdapter is a thin shim that exposes AskUserTool to the

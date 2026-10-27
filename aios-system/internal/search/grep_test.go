@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 func writeFile(t *testing.T, dir, name, body string) {

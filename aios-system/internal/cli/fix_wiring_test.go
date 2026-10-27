@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/approvals"
-	"github.com/sadi/aios-system/internal/core/schemas"
-	"github.com/sadi/aios-system/internal/models"
-	"github.com/sadi/aios-system/internal/planner"
-	"github.com/sadi/aios-system/internal/policy"
-	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/approvals"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/planner"
+	"github.com/Hamidullah02/aios/aios-system/internal/policy"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
 )
 
 // stubAdapter is a models.Adapter that returns a fixed

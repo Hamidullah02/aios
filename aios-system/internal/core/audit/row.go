@@ -39,9 +39,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/clock"
-	"github.com/sadi/aios-system/internal/core/redact"
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/redact"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 // Row is a single audit row before hashing.

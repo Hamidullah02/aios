@@ -5,15 +5,15 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/sadi/aios-system/internal/approvals"
-	"github.com/sadi/aios-system/internal/ask"
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/egress"
-	"github.com/sadi/aios-system/internal/models"
-	"github.com/sadi/aios-system/internal/planner"
-	"github.com/sadi/aios-system/internal/policy"
-	"github.com/sadi/aios-system/internal/runtime"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/approvals"
+	"github.com/Hamidullah02/aios/aios-system/internal/ask"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/egress"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/planner"
+	"github.com/Hamidullah02/aios/aios-system/internal/policy"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // subcommands that bootstrap the workspace. These run

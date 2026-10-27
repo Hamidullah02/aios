@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 // Action is the gateway's verdict for a tool call.

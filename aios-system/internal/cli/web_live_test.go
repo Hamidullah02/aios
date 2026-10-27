@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/core/schemas"
-	"github.com/sadi/aios-system/internal/runtime"
-	"github.com/sadi/aios-system/internal/webui"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/webui"
 )
 
 // freeAddr returns a loopback address that was free a moment

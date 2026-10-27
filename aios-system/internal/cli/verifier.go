@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
 )
 
 // CommandVerifier is the production verifier the CLI ships

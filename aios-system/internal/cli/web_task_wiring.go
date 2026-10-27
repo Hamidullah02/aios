@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/sadi/aios-system/internal/webui"
+	"github.com/Hamidullah02/aios/aios-system/internal/webui"
 )
 
 // attachWebTaskSubmitter wires the browser's task submission

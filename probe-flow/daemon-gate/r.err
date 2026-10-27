@@ -1,2 +1,3 @@
-egress: proxy at http://127.0.0.1:57623, allow list has 3 host rule(s); isolation: process group / job object only
-plan error: plan load error in plan.yaml: open plan.yaml: The system cannot find the file specified.
+egress: proxy at http://127.0.0.1:53061, allow list has 3 host rule(s); isolation: process group / job object only
+approval 6eff8b0d-1880-4de5-b009-a4f364ce855d: waiting for a decision (approve it with `aios approve 6eff8b0d-1880-4de5-b009-a4f364ce855d`)
+approval 6eff8b0d-1880-4de5-b009-a4f364ce855d: granted

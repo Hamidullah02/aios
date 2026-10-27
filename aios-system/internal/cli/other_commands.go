@@ -8,9 +8,9 @@ import (
 	"html"
 	"io"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/core/schemas"
-	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
 )
 
 // ResumeDeps is the wiring the resume subcommand needs.

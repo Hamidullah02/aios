@@ -27,7 +27,17 @@ needed and nothing to compile.
 From source instead:
 
 ```
-go install github.com/sadi/aios-system/cmd/aios@latest
+go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest
+```
+
+The Go module lives in the repository's `aios-system/` subdirectory,
+so its path carries both the repository name and the subdirectory.
+The release pipeline tags it accordingly -- see **Releasing** below.
+
+To see which build you have:
+
+```
+aios --version
 ```
 
 ## Your model key
@@ -300,6 +310,35 @@ request. It has three jobs:
 The release workflow runs the same checks, including the race detector,
 before it packages a binary. It is not enough to have CI on pull requests:
 a tag can be pushed without one ever being opened.
+
+## Releasing
+
+Push a plain `v` tag and the pipeline does the rest:
+
+```
+git tag v0.56.0
+git push origin v0.56.0
+```
+
+That builds all five targets, stamps the version and commit into each
+binary, publishes the release assets, and then pushes a **second** tag,
+`aios-system/v0.56.0`.
+
+**Why two tags.** The Go module lives in this repository's
+`aios-system/` subdirectory, and the Go tooling only looks for a
+module in a subdirectory under a tag whose name carries the
+subdirectory. With only the plain tag, `go install` fails with
+"module ... found, but does not contain package .../cmd/aios" -- it
+finds the repository at the plain version tag and looks for the
+package in the wrong place.
+
+The plain tag is what the installers and the release page use. The
+prefixed tag is what `go install` resolves. Both point at the same
+commit.
+
+The release job also **runs each built binary and checks what it
+prints**, so a broken version stamp fails the release rather than
+shipping a binary that cannot say what it is.
 
 ## Notes on the doc set
 

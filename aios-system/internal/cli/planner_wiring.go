@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"github.com/sadi/aios-system/internal/planner"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/planner"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // plannerToolSpecs is the planner's view of the production

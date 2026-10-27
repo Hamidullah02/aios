@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
 )
 
 // fakeStream is a Stream backed by a sequence of chunks. Used

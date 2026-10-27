@@ -3,7 +3,7 @@ package cli
 import (
 	"os"
 
-	"github.com/sadi/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
 )
 
 // EnvModel is the environment variable that selects the model

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
 )
 
 // SubAgentFactory builds a sub-agent for a single

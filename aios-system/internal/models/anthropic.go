@@ -30,6 +30,14 @@ type AnthropicConfig struct {
 	Base   string // empty -> https://api.anthropic.com/v1
 }
 
+// EnvAnthropicBase is the environment variable that overrides the
+// Anthropic API root.
+//
+// It is the same escape hatch as EnvOpenRouterBase: an operator
+// behind a gateway needs to name it, and a run that must not
+// depend on a live provider needs a deterministic endpoint.
+const EnvAnthropicBase = "ANTHROPIC_BASE_URL"
+
 // NewAnthropic returns an AnthropicAdapter. apiKey may be
 // empty; in that case Complete/Stream return an error at call
 // time.
@@ -43,6 +51,9 @@ func NewAnthropic(cfg AnthropicConfig) *AnthropicAdapter {
 		client = http.DefaultClient
 	}
 	base := cfg.Base
+	if base == "" {
+		base = os.Getenv(EnvAnthropicBase)
+	}
 	if base == "" {
 		base = "https://api.anthropic.com/v1"
 	}

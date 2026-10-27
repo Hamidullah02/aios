@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/sadi/aios-system/internal/core/schemas"
-	"github.com/sadi/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
 )
 
 // currentPlatform names the operating system the plan will run on.

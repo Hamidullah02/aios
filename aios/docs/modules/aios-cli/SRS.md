@@ -58,6 +58,24 @@ following subcommands.
 **REQ-CLI-FST-004** The command shall print a
 help message when the user types `aios --help`.
 
+**REQ-CLI-FST-005** The command shall print the
+version of the build when the user types `aios --version`,
+and shall exit successfully without performing any other
+work. The version shall be the release tag when the build
+was stamped at link time, and `dev` when it was not.
+
+The command shall not require a readable configuration
+file, a writable workspace, or a model key. A user asking
+which build they have is often doing it because something
+else is broken, and requiring a working configuration to
+answer that question would make it unanswerable exactly
+when it is needed.
+
+**REQ-CLI-FST-006** The version reported shall name the
+same release as the distribution's release notes and
+installer. The release pipeline shall stamp it at link time
+and shall verify it by running the built binary.
+
 ### 5.2 Run Subcommand
 
 **REQ-CLI-RUN-001** The `run` subcommand shall

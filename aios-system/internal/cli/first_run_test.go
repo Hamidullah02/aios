@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/policy"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/policy"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // repoRoot is the directory holding the repository's root files.
@@ -51,18 +51,21 @@ func repoRoot(t *testing.T) string {
 // the operator's first experience of the product was a failure
 // with no cause they could see.
 //
-// The Go module path is deliberately NOT the same string: the
-// module is github.com/sadi/aios-system, and renaming it would
-// touch every import in the tree for no benefit to an operator
-// installing a binary. So this test pins the two separately: the
-// URLs must name the GitHub repo, and `go install` must name the
-// module.
+// The Go module path carries the repository name too, plus the
+// subdirectory the module lives in. It used to be
+// github.com/sadi/aios-system -- a repository that does not exist
+// and never did -- so `go install` in the README could not work
+// even once the repo was public. The module path is now the one
+// the Go tooling can actually resolve.
+//
+// This test pins the two separately: the URLs must name the
+// GitHub repo, and `go install` must name the module.
 func TestInstallers_PointAtTheRealRepo(t *testing.T) {
 	root := repoRoot(t)
 
 	const (
 		githubRepo = "Hamidullah02/aios"
-		goModule   = "github.com/sadi/aios-system"
+		goModule   = "github.com/Hamidullah02/aios/aios-system"
 	)
 
 	for _, name := range []string{"install.sh", "install.ps1", ".github/workflows/release.yml", "README.md"} {
@@ -78,7 +81,7 @@ func TestInstallers_PointAtTheRealRepo(t *testing.T) {
 		if strings.Contains(text, "raw.githubusercontent.com/sadi/aios-system") {
 			t.Errorf("%s: still points the raw download at sadi/aios-system", name)
 		}
-		if strings.Contains(text, "github.com/sadi/aios-system/releases") {
+		if strings.Contains(text, "github.com/Hamidullah02/aios/aios-system/releases") {
 			t.Errorf("%s: still points the release download at sadi/aios-system", name)
 		}
 

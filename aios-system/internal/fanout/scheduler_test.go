@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
 )
 
 // newTestScheduler constructs a Scheduler with

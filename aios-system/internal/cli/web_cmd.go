@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sadi/aios-system/internal/webui"
+	"github.com/Hamidullah02/aios/aios-system/internal/webui"
 )
 
 // runWeb serves the operator UI.

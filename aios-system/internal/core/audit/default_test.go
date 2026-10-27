@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
 )
 
 // TestOpenDefault_FallsBackToVarAuditDB verifies the default-path

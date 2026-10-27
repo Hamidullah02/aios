@@ -38,7 +38,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 // Question is the typed question the agent sends to the

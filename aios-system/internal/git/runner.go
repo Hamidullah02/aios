@@ -3,8 +3,8 @@ package git
 import (
 	"os/exec"
 
-	"github.com/sadi/aios-system/internal/sandbox"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/sandbox"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // runner is the interface every tool uses to run git. The

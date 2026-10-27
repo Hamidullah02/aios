@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sadi/aios-system/internal/webui"
+	"github.com/Hamidullah02/aios/aios-system/internal/version"
+	"github.com/Hamidullah02/aios/aios-system/internal/webui"
 )
 
 // Main is the entry point the production binary calls. The
@@ -57,6 +58,15 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprint(stderr, DisplayError(err, false))
 		return ExitCodeFor(err)
+	}
+	// --version is answered before the dependencies are built.
+	// Reporting a version must not depend on a readable config
+	// file, a writable workspace, or a model key: a user asking
+	// "which build is this" is often doing it because something
+	// else is broken.
+	if args.ShowVersion {
+		fmt.Fprintln(stdout, version.String())
+		return ExitOK
 	}
 	deps, err := BuildDeps(args)
 	if err != nil {

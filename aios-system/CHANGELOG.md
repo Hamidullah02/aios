@@ -1,5 +1,219 @@
 # Changelog
 
+## v0.56.0 — the binary could not say what it was, and `go install` could not work
+
+Three things stood between this repository and a user who wanted to
+install it. All three are fixed here. One of them cannot be fixed
+from inside the repository, and it is named plainly at the bottom.
+
+### `aios --version` did not exist
+
+**The first question in every bug report could not be answered.**
+`aios --version` failed with `flag provided but not defined:
+-version` and exited 1. There was no version string anywhere in the
+source, so a user who wanted to report a bug had to find the
+CHANGELOG and work out which release they had.
+
+`internal/version` holds the version, and the release workflow stamps
+it at link time:
+
+```
+-ldflags="-X github.com/Hamidullah02/aios/aios-system/internal/version.Version=$TAG"
+```
+
+The commit is stamped as well, because two builds from the same tag
+can differ. The release workflow then **runs the binary and checks
+what it prints** -- a typo in the `-ldflags` path builds perfectly and
+produces a binary that says "dev", so the stamp is verified rather
+than assumed.
+
+A build made with a plain `go build` reports `aios dev`, which is
+the truth about a binary nobody stamped.
+
+### `go install` named a repository that does not exist
+
+**The README's second install method could not work.** It said:
+
+```
+go install github.com/sadi/aios-system/cmd/aios@latest
+```
+
+`github.com/sadi/aios-system` is not a repository. It never was.
+The repository is `github.com/Hamidullah02/aios`, and the Go module
+lives in its `aios-system/` subdirectory, so the path that actually
+resolves is:
+
+```
+go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest
+```
+
+The module path in `go.mod` and the 161 Go files that import from
+it now say the same thing. The old path would have kept compiling
+locally -- an import is resolved from the module, not the network --
+so nothing else would have caught it.
+
+**There is a second half to this, and it is the part that is easy
+to miss.** The Go tooling only looks for a module in a repository
+subdirectory under a tag whose name carries the subdirectory. With
+only a plain `v0.56.0` tag, `go install` fails with:
+
+```
+module github.com/example/repo@v1.0.0 found, but does not contain package
+github.com/example/repo/sub/cmd/tool
+```
+
+It finds the repository at the plain version tag and looks for the
+package in the wrong place.
+
+So the release workflow pushes **two** tags for every release: the
+plain `v0.56.0` that the installers and the release page use, and
+`aios-system/v0.56.0` for the Go module.
+
+This was not worked out from the documentation and hoped for. The
+rule was confirmed two ways: the Go module proxy's own metadata for
+a known subdirectory module names the prefixed tag as its source
+(`"Ref": "refs/tags/api/v1.23.0"`), and the behaviour was then
+reproduced end to end against a local repository -- with the
+prefixed tag the install succeeds and the binary runs; with only the
+plain tag it fails.
+
+The module tag is pushed **after** the release is published, so a
+failed release cannot leave a module version pointing at binaries
+nobody can download.
+
+### There was no licence
+
+The repository had no `LICENSE` file. A repository with no licence
+is not open source -- every user has no permission to use, copy,
+modify or redistribute it, whatever the README implies. There is an
+MIT licence at the repository root now.
+
+### The agent could not run anything on Linux
+
+**Making the repository public turned on the CI, and the CI found
+that the product was broken on Linux.** Twenty-six tests failed.
+Not one of them failed on Windows, and not one of them was a test
+problem: they were the product refusing to do its job.
+
+**Every subprocess the agent tried to run was refused.** The
+sandbox's privilege drop treated any non-negative UID or GID as
+"drop to this user":
+
+```go
+if l.GID >= 0 {
+    syscall.Setgid(l.GID)
+}
+```
+
+`ResourceLimits.UID` and `ResourceLimits.GID` default to `0`, and
+`0` is root. So every run with default limits -- which is every
+run -- asked to `setgid(0)` and `setuid(0)`. On Linux that is
+`EPERM` for any process that is not already root, and the failure
+was fatal: the runner returned before starting the child. A user
+on Linux got:
+
+```
+sandbox: apply limits: sandbox: resource limit exceeded: privilege:
+sandbox: limits: gid: operation not permitted.
+```
+
+for every tool call. The agent could read, search, and edit --
+those do not spawn processes -- and could not run a single command.
+
+The defect was invisible on Windows, where the privilege drop is a
+no-op, and invisible in normal use, because no caller ever set a
+UID or a GID. It needed the Linux CI job to surface.
+
+A sandbox that runs its child as root is not a sandbox, so the
+test is now "greater than zero", not "not negative". `0` and the
+negatives both mean "leave the credentials alone", and the
+sentinel is named rather than left to the zero value:
+
+```go
+const NoPrivilegeDrop = -1
+```
+
+`internal/sandbox/privilege_drop_test.go` pins the default does
+not drop, that `uid 0` is not read as a request to become root,
+and that a limit naming a real user still drops. The last of
+those is skipped without root, because dropping privileges
+requires the privilege to drop.
+
+### A layout file in the wrong place took the UI down on Linux
+
+**A path the layout file cannot occupy was a hard error on Linux
+and a non-event on Windows.** The store swallowed "the file is not
+there"; it did not swallow "a component of the path is not a
+directory":
+
+- Windows returns `ERROR_PATH_NOT_FOUND`, which `os.IsNotExist`
+  recognises.
+- Linux returns `ENOTDIR`, which it does not.
+
+So the same store, at the same path, meant "nothing saved yet" on
+one platform and "here is an error" on the other. A layout file in
+an unreachable place took the whole UI down on Linux and not on
+Windows.
+
+`isNoLayoutFile` now names the whole set -- `ENOENT`,
+`fs.ErrNotExist`, and `ENOTDIR` -- so the rule is the same
+everywhere: if the file is not there, there is no saved layout and
+the server starts with the defaults. A file that *is* there and
+cannot be parsed is still an error, and is still reported.
+
+### Also in this release
+
+- The installers now print the version of the binary they actually
+  installed. An operator filing a bug report needs the version of
+  the binary in front of them, not the one they meant to run.
+- The release notes now carry the `go install` line alongside the
+  two installer commands.
+- The release workflow's `release` job checks out the full history.
+  It pushes a tag now, and a shallow clone has no parent commits to
+  point it at.
+
+### The approval journey hung, and the reason was a leaked process
+
+**A journey that passed was reported as never finishing.** The
+approval journey started a stub model provider with its output
+redirected to a file, and stopped the `aios` process at the end --
+but not the stub. The stub kept the handle on its redirected output
+open, so the wrapper capturing the journey's output waited for a
+handle that would never close.
+
+The journey's own output was complete and correct the whole time.
+The run just never finished: it sat for fifty minutes on output
+that had already said everything it was going to say.
+
+The stub was stopped only on the early-exit path, so the normal
+path -- the one that completes the journey -- was the one that
+leaked. The same leak was in the `rina` journey's early-exit path
+and has been fixed there too.
+
+This is worth recording because the symptom was so misleading: the
+naive reading is "the product hung", and the product had not. The
+test harness had.
+
+### What this release does not fix
+
+**The repository is public, and the install URL now resolves.** It
+was private when this release was written; the file moves and the
+URL fixes above are visible now, and the installer scripts are
+fetchable by anyone.
+
+**There are still no tags.** The release pipeline has never run
+against this repository. The first `v0.56.0` tag is what creates
+the release assets the installers download and the module version
+`go install` resolves.
+
+**The CI has never been green.** It had run exactly once, on the
+commit that made the repository public, and it failed on Linux --
+see above. That run is the first thing that ever exercised the
+suite on a platform other than the author's, and it found two
+defects that the Windows-only development loop could not. The
+fixes are in this release; whether the suite is green on Linux is
+now a question the next CI run answers.
+
 ## v0.55.0 — the install link pointed at a file that was not there
 
 **The documented install command could not work.** The README and

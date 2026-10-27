@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
 )
 
 func newTestGateway(t *testing.T, rules []Rule) (*Gateway, *audit.Log) {

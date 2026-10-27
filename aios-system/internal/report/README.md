@@ -26,7 +26,7 @@ library (text/template, html/template, embed).
 ## Usage
 
 ```go
-import "github.com/sadi/aios-system/internal/report"
+import "github.com/Hamidullah02/aios/aios-system/internal/report"
 
 r := report.NewJSONRenderer()
 out, err := r.Render(&report.Report{ ... })

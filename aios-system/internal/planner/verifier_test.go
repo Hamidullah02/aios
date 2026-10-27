@@ -3,7 +3,7 @@ package planner
 import (
 	"testing"
 
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 func goodPlan() *schemas.TaskPlan {

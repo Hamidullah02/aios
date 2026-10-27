@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/ask"
-	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/ask"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
 )
 
 func TestPassthroughWorker_KnownTools(t *testing.T) {

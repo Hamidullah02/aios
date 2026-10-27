@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"sort"
 
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 // hashListPair is shared between AllowList.Hash and similar future

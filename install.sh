@@ -24,10 +24,11 @@
 #                  when writable, else ~/.local/bin)
 #   AIOS_REPO      the GitHub repo (default: Hamidullah02/aios)
 #
-# The repo is the GitHub one the releases live in. It is not the
-# Go module path: the module is still github.com/sadi/aios-system,
-# because renaming it would touch every import in the tree for no
-# benefit to an operator installing a binary.
+# The repo is the GitHub one the releases live in. The Go module
+# lives in its aios-system/ subdirectory, so the module path
+# carries both: github.com/Hamidullah02/aios/aios-system. That is
+# the path `go install` needs, and it is why the module path and
+# the repo name are not the same string.
 
 set -eu
 
@@ -45,13 +46,13 @@ arch="$(uname -m)"
 case "$os" in
   Linux)  os="linux" ;;
   Darwin) os="darwin" ;;
-  *)      die "unsupported OS: $os. Build from source instead: go install github.com/sadi/aios-system/cmd/aios@latest" ;;
+  *)      die "unsupported OS: $os. Build from source instead: go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest" ;;
 esac
 
 case "$arch" in
   x86_64|amd64)  arch="amd64" ;;
   aarch64|arm64) arch="arm64" ;;
-  *)             die "unsupported CPU: $arch. Build from source instead: go install github.com/sadi/aios-system/cmd/aios@latest" ;;
+  *)             die "unsupported CPU: $arch. Build from source instead: go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest" ;;
 esac
 
 asset="aios_${os}_${arch}.tar.gz"
@@ -81,7 +82,7 @@ trap 'rm -rf "$tmp"' EXIT
 if ! curl -fsSL "$url" -o "$tmp/$asset"; then
   die "could not download $url
 The release may not have a build for this platform yet.
-Build from source instead: go install github.com/sadi/aios-system/cmd/aios@latest"
+Build from source instead: go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest"
 fi
 
 # --- unpack -------------------------------------------------------------
@@ -117,8 +118,14 @@ if ! "$dest/aios" --help >/dev/null 2>&1; then
   die "the installed binary did not run. Try: $dest/aios --help"
 fi
 
+# Report what was actually installed. An operator who needs to
+# file a bug report needs the version of the binary they are
+# looking at, not the version they thought they were running.
+installed_version="$("$dest/aios" --version 2>/dev/null || echo 'unknown')"
+
 say ""
 say "aios is installed at $dest/aios"
+say "  $installed_version"
 case ":$PATH:" in
   *":$dest:"*) ;;
   *) say "NOTE: $dest is not on your PATH. Add it: export PATH=\"$dest:\$PATH\"" ;;

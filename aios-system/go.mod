@@ -1,4 +1,4 @@
-module github.com/sadi/aios-system
+module github.com/Hamidullah02/aios/aios-system
 
 go 1.23
 

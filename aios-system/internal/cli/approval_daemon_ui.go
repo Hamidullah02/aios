@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/sadi/aios-system/internal/webui"
+	"github.com/Hamidullah02/aios/aios-system/internal/webui"
 )
 
 // DaemonApprovalResolver resolves UI decisions through a

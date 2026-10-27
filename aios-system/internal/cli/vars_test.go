@@ -3,8 +3,8 @@ package cli
 import (
 	"testing"
 
-	"github.com/sadi/aios-system/internal/runtime"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // TestInterpolate_ReplacesString is the base case: a

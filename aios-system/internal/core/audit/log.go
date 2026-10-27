@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/sadi/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
 )

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // TestPlannerToolSpecs_CoverEveryBusTool is the gate that

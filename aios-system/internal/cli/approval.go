@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
 )
 
 // Approval prompt answers an approval request from a human at

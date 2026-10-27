@@ -17,7 +17,7 @@ package main
 import (
 	"os"
 
-	"github.com/sadi/aios-system/internal/cli"
+	"github.com/Hamidullah02/aios/aios-system/internal/cli"
 )
 
 func main() {

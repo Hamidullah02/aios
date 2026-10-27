@@ -92,7 +92,38 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -ldflags="-s -w" -o aios ./cmd/aios
+          TAG: ${{ inputs.tag || github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        # The version is stamped in at link time. Without it every
+        # binary would report "dev", and a user asking "which build
+        # is this" would get an answer that cannot be acted on.
+        #
+        # The tag is the version, so the two cannot drift: the
+        # release notes, the installer, and the binary all name
+        # the same string. The commit is stamped too, because two
+        # builds from the same tag can differ.
+        run: >
+          go build -trimpath
+          -ldflags="-s -w
+          -X github.com/Hamidullah02/aios/aios-system/internal/version.Version=$TAG
+          -X github.com/Hamidullah02/aios/aios-system/internal/version.Commit=$COMMIT"
+          -o aios ./cmd/aios
+
+      - name: Check the binary reports the tag it was built from
+        if: matrix.os != 'windows'
+        working-directory: aios-system
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        # The stamp is checked, not assumed. A typo in the
+        # -ldflags path builds fine and produces a binary that
+        # says "dev" -- and the only way to notice is to run it.
+        run: |
+          reported="$(./aios --version)"
+          echo "aios reports: $reported"
+          case "$reported" in
+            *"$TAG"*) echo "version stamp is correct" ;;
+            *) echo "ERROR: binary does not report $TAG" >&2; exit 1 ;;
+          esac
 
       - name: Package (tar.gz)
         if: matrix.os != 'windows'
@@ -113,7 +144,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # The full history is needed: this job pushes the module tag,
+      # and a shallow clone has no parent commits to point it at.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -137,6 +172,12 @@ jobs:
 
           ```
           irm https://raw.githubusercontent.com/Hamidullah02/aios/main/install.ps1 | iex
+          ```
+
+          From source, if you already have Go:
+
+          ```
+          go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest
           ```
 
           ## Start
@@ -172,3 +213,36 @@ jobs:
             --title "aios $TAG" \
             --notes-file notes.md \
             || gh release upload "$TAG" dist/* --clobber
+
+      - name: Tag the module so `go install` can find it
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        # The Go module lives in this repository's aios-system/
+        # subdirectory, and the Go tooling only looks for a module
+        # in a subdirectory under a tag whose name carries the
+        # subdirectory: aios-system/v0.56.0, not v0.56.0.
+        #
+        # Without this tag the README's
+        #
+        #   go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest
+        #
+        # cannot work. It fails with "module ... found, but does
+        # not contain package .../cmd/aios" -- the tooling found
+        # the repository at the plain version tag and looked for
+        # the package in the wrong place.
+        #
+        # This is not a guess. The rule was verified against the
+        # Go module proxy's own metadata for a known subdirectory
+        # module, and end to end with a local repository: with only
+        # the prefixed tag the install succeeds, and with only the
+        # plain tag it fails.
+        #
+        # The tag is created after the release is published, so a
+        # failed release cannot leave a module version pointing at
+        # binaries nobody can download.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "aios-system/$TAG" "$GITHUB_SHA"
+          git push --force origin "refs/tags/aios-system/$TAG"
+          echo "tagged aios-system/$TAG at $GITHUB_SHA"

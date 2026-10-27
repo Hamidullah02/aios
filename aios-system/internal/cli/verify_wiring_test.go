@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/models"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // TestWireVerifyTools_AlwaysReturnsRunTests asserts the

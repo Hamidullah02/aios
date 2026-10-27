@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/sandbox"
+	"github.com/Hamidullah02/aios/aios-system/internal/sandbox"
 )
 
 // fakeRunner is a deterministic stand-in for sandbox.Runner.

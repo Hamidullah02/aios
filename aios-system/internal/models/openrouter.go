@@ -34,6 +34,19 @@ const EnvOpenRouterAPIKeyAlias = "openrouterapi"
 // itself, the same way the other two adapters do.
 const DefaultOpenRouterBase = "https://openrouter.ai/api/v1"
 
+// EnvOpenRouterBase is the environment variable that overrides the
+// OpenRouter API root.
+//
+// It exists for two reasons. An operator who routes OpenRouter
+// through their own gateway needs a way to say where that gateway
+// is. And a test -- or a user-flow run -- that must not depend on
+// a live provider, a shared rate limit, or the weather needs a
+// deterministic endpoint to talk to.
+//
+// The value is the API root, with the /v1 suffix the adapter
+// expects, e.g. "http://127.0.0.1:8080/api/v1".
+const EnvOpenRouterBase = "OPENROUTER_BASE_URL"
+
 // OpenRouterAdapter calls the OpenRouter chat-completions API.
 //
 // OpenRouter speaks the OpenAI wire format, so the request and
@@ -77,6 +90,9 @@ func NewOpenRouter(cfg OpenRouterConfig) *OpenRouterAdapter {
 		client = http.DefaultClient
 	}
 	base := cfg.Base
+	if base == "" {
+		base = os.Getenv(EnvOpenRouterBase)
+	}
 	if base == "" {
 		base = DefaultOpenRouterBase
 	}
@@ -246,7 +262,7 @@ func (a *OpenRouterAdapter) newRequest(ctx context.Context, method, path string,
 	// OpenRouter attributes calls to an app using these two
 	// headers. They are optional, but sending them is what
 	// OpenRouter asks for and they cost nothing.
-	req.Header.Set("HTTP-Referer", "https://github.com/sadi/aios-system")
+	req.Header.Set("HTTP-Referer", "https://github.com/Hamidullah02/aios")
 	req.Header.Set("X-Title", "aios")
 	return req, nil
 }

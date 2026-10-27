@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/sandbox"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/sandbox"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 func TestDiff_Run(t *testing.T) {

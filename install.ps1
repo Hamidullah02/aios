@@ -25,10 +25,10 @@
 .PARAMETER Repo
     The GitHub repo to download from. Defaults to Hamidullah02/aios.
 
-    It is the GitHub repo, not the Go module path. The module is
-    still github.com/sadi/aios-system; renaming it would touch
-    every import in the tree for no benefit to an operator
-    installing a binary.
+    It is the GitHub repo, not the Go module path. The module
+    lives in its aios-system/ subdirectory, so the module path
+    carries both: github.com/Hamidullah02/aios/aios-system. That
+    is the path `go install` needs.
 #>
 [CmdletBinding()]
 param(
@@ -61,7 +61,7 @@ switch ($arch) {
     "AMD64" { $cpu = "amd64" }
     default {
         Die "this installer has a build for x64 Windows only (PROCESSOR_ARCHITECTURE=$arch).
-Build from source instead: go install github.com/sadi/aios-system/cmd/aios@latest"
+Build from source instead: go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest"
     }
 }
 
@@ -96,7 +96,7 @@ try {
     } catch {
         Die "could not download $url
 The release may not have a build for this CPU yet.
-Build from source instead: go install github.com/sadi/aios-system/cmd/aios@latest"
+Build from source instead: go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest"
     }
 
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
@@ -120,8 +120,15 @@ Build from source instead: go install github.com/sadi/aios-system/cmd/aios@lates
         Die "the installed binary did not run. Try: $installed --help"
     }
 
+    # Report what was actually installed. An operator who needs to
+    # file a bug report needs the version of the binary they are
+    # looking at, not the version they thought they were running.
+    $installedVersion = (& $installed --version 2>$null) -join ""
+    if (-not $installedVersion) { $installedVersion = "unknown" }
+
     Say ""
     Say "aios is installed at $installed"
+    Say "  $installedVersion"
 
     # The PATH is only useful if the operator's shell will see it.
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/clock"
-	"github.com/sadi/aios-system/internal/core/state"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/state"
 )
 
 func TestEachType_MarshalUnmarshal_RoundTrip(t *testing.T) {

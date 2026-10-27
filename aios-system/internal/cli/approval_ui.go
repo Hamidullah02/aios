@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sadi/aios-system/internal/runtime"
-	"github.com/sadi/aios-system/internal/webui"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/webui"
 )
 
 // UIApprovalHandler parks an approval in the web UI and waits

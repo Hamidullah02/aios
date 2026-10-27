@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/policy"
+	"github.com/Hamidullah02/aios/aios-system/internal/policy"
 )
 
 // TestPolicyPath_ReturnsPolicyFileWhenBaseMatches

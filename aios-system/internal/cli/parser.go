@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sadi/aios-system/internal/webui"
+	"github.com/Hamidullah02/aios/aios-system/internal/webui"
 )
 
 // Subcommand is the set of supported subcommands. The list is
@@ -133,6 +133,16 @@ type Args struct {
 	// not. IsolationModeNamespaces requires them and fails
 	// without them.
 	IsolationMode string
+	// ShowVersion is set by --version. The command prints the
+	// build's version and exits without doing anything else.
+	//
+	// It is a flag rather than a subcommand because that is what
+	// every other tool does, and because a user reaching for
+	// `--version` has usually been told to run it by someone
+	// asking which build they have. Making it a subcommand would
+	// make them try `aios version` first, get a usage error, and
+	// try again.
+	ShowVersion bool
 }
 
 // Parse parses argv into Args. argv[0] is the program name
@@ -192,6 +202,7 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
 	fs.BoolVar(&a.Debug, "debug", false, "print the full error traceback on failure")
+	fs.BoolVar(&a.ShowVersion, "version", false, "print the version of this build and exit")
 	fs.StringVar(&a.ConfigPath, "config", DefaultConfigPath, "path to the config file")
 	fs.StringVar(&a.LogPath, "log", DefaultLogPath, "path to the audit log database")
 	fs.StringVar(&a.Workspace, "workspace", "", "tool-bus workspace root; default = dirname of --config")
@@ -213,13 +224,20 @@ func Parse(argv []string, w io.Writer) (*Args, error) {
 	// only the flags it declares.
 	idx := findSubcommandIndex(argv[1:])
 	if idx < 0 {
-		// No subcommand. Maybe the user asked for --help.
+		// No subcommand. Maybe the user asked for --help, or for
+		// --version.
 		if err := fs.Parse(argv[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				printHelp(w)
 				return a, errHelp
 			}
 			return nil, &CliError{Kind: "user", What: err.Error(), Cause: err}
+		}
+		// --version is answered on its own: it needs no
+		// subcommand, and asking for one would be an error the
+		// user cannot act on.
+		if a.ShowVersion {
+			return a, nil
 		}
 		return nil, &CliError{Kind: "user", What: "missing subcommand (try `aios --help`)"}
 	}
@@ -631,10 +649,11 @@ func HelpText() string {
 // default OEM code page, and the product ships on Windows first,
 // so the punctuation has to survive a console that is not
 // UTF-8.
-const helpBody = `aios - aios-system CLI
+const helpBody = `aios - the aios CLI
 
 Usage:
   aios [--debug] [--config=path] [--log=path] <subcommand> [flags] [args...]
+  aios --version
 
 Subcommands:
   fix <objective>        Plan + run: turn the objective into a plan and run it.
@@ -653,6 +672,7 @@ Subcommands:
 
 Global flags:
   --debug                Print the full error traceback on failure.
+  --version              Print the version of this build and exit.
   --config=path          Config file (default: ./var/config.yaml).
   --log=path             Audit log database (default: ./var/aios.db).
   --workspace=path       Tool-bus workspace root (default: dirname of --config).

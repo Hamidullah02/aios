@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sadi/aios-system/internal/egress"
-	"github.com/sadi/aios-system/internal/models"
+	"github.com/Hamidullah02/aios/aios-system/internal/egress"
+	"github.com/Hamidullah02/aios/aios-system/internal/models"
 )
 
 // buildRouter constructs the production model router. The

@@ -17,8 +17,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
 )
 
 // Proxy is the egress proxy server.

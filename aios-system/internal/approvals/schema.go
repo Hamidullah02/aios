@@ -25,7 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 // State is the lifecycle state of one approval.

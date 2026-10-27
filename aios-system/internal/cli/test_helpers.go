@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/ask"
-	"github.com/sadi/aios-system/internal/core/audit"
-	"github.com/sadi/aios-system/internal/policy"
-	"github.com/sadi/aios-system/internal/sandbox"
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/ask"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/audit"
+	"github.com/Hamidullah02/aios/aios-system/internal/policy"
+	"github.com/Hamidullah02/aios/aios-system/internal/sandbox"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // buildTestAgentLoop constructs the production wire

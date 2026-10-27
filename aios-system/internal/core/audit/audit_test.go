@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/core/clock"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/clock"
 )
 
 // newTestLog returns an in-memory Log with a fixed decision clock.

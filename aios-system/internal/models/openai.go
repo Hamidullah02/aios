@@ -31,6 +31,14 @@ type OpenAIConfig struct {
 	Base   string       // empty -> https://api.openai.com/v1
 }
 
+// EnvOpenAIBase is the environment variable that overrides the
+// OpenAI API root.
+//
+// It is the same escape hatch as EnvOpenRouterBase: an operator
+// behind a gateway needs to name it, and a run that must not
+// depend on a live provider needs a deterministic endpoint.
+const EnvOpenAIBase = "OPENAI_BASE_URL"
+
 // NewOpenAI returns an OpenAIAdapter. apiKey may be empty; in
 // that case Complete/Stream return an error at call time.
 func NewOpenAI(cfg OpenAIConfig) *OpenAIAdapter {
@@ -43,6 +51,9 @@ func NewOpenAI(cfg OpenAIConfig) *OpenAIAdapter {
 		client = http.DefaultClient
 	}
 	base := cfg.Base
+	if base == "" {
+		base = os.Getenv(EnvOpenAIBase)
+	}
 	if base == "" {
 		base = "https://api.openai.com/v1"
 	}

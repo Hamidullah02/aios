@@ -1,6 +1,6 @@
 package audit
 
-import "github.com/sadi/aios-system/internal/core/redact"
+import "github.com/Hamidullah02/aios/aios-system/internal/core/redact"
 
 // Doc-set names. The doc set (SRS §7 IFC-002) names the audit types
 // `AuditLog`, `AuditRow`, and `RedactionMarker`. The implementation

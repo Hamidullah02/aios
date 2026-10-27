@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // EditTool replaces old_string with new_string in one file

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/policy"
+	"github.com/Hamidullah02/aios/aios-system/internal/policy"
 )
 
 // TestInit_DefaultPolicyValidates is the v0.36.0 bug

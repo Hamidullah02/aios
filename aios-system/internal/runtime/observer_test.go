@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sadi/aios-system/internal/core/state"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/state"
 )
 
 // recordingObserver captures every event it receives.

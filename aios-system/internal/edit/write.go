@@ -1,7 +1,7 @@
 package edit
 
 import (
-	"github.com/sadi/aios-system/internal/tools"
+	"github.com/Hamidullah02/aios/aios-system/internal/tools"
 )
 
 // WriteTool re-exports the write-file tool from aios-tools

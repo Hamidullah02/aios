@@ -58,9 +58,25 @@ func detectResourceLimit(state *os.ProcessState) (string, bool) {
 }
 
 // dropPrivileges is the POSIX implementation. The function
-// calls Setgid when the GID is non-negative, then Setuid
-// when the UID is non-negative. The setgid must come first
+// calls Setgid when the GID names a user to drop to, then
+// Setuid when the UID names one. The setgid must come first
 // because a non-root process cannot setgid after Setuid.
+//
+// # Only a positive id is a drop request
+//
+// The zero value is not "drop to root". A sandbox that runs a
+// child as root is not a sandbox, and uid 0 is what a
+// zero-valued struct carries by accident. So the test is
+// "greater than zero", not "not negative".
+//
+// This is also what fixed the Linux failure. The old test was
+// "not negative", so the zero value reached Setgid(0) and
+// failed with EPERM for any process that was not already root,
+// and the failure was fatal -- the runner refused to start the
+// child, so every subprocess the agent tried to run was
+// refused with "sandbox: limits: gid: operation not
+// permitted". The defect was invisible on Windows, where this
+// function is a no-op.
 //
 // The function returns nil when no privilege drop was
 // requested.
@@ -68,12 +84,12 @@ func dropPrivileges(l *ResourceLimits) error {
 	if l == nil {
 		return nil
 	}
-	if l.GID >= 0 {
+	if l.GID > 0 {
 		if err := syscall.Setgid(l.GID); err != nil {
 			return &LimitsError{Field: "gid", Reason: err.Error()}
 		}
 	}
-	if l.UID >= 0 {
+	if l.UID > 0 {
 		if err := syscall.Setuid(l.UID); err != nil {
 			return &LimitsError{Field: "uid", Reason: err.Error()}
 		}

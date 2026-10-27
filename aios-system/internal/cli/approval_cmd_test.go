@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sadi/aios-system/internal/approvals"
-	"github.com/sadi/aios-system/internal/core/schemas"
+	"github.com/Hamidullah02/aios/aios-system/internal/approvals"
+	"github.com/Hamidullah02/aios/aios-system/internal/core/schemas"
 )
 
 // encJSON / decJSON are the line-JSON codec the daemon uses.

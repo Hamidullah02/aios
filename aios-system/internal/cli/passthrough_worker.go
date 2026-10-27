@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sadi/aios-system/internal/ask"
-	"github.com/sadi/aios-system/internal/runtime"
+	"github.com/Hamidullah02/aios/aios-system/internal/ask"
+	"github.com/Hamidullah02/aios/aios-system/internal/runtime"
 )
 
 // defaultStdin / defaultStdout are the I/O defaults the

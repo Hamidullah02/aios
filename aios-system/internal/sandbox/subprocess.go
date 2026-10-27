@@ -277,7 +277,15 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	limits := ResourceLimits{TimeSeconds: timeout}
+	// The default limits say explicitly that no privilege drop
+	// is wanted. The zero value of the UID and GID fields is 0,
+	// which is root, so the sentinel is stated here rather than
+	// left to the zero value. See ResourceLimits.NoPrivilegeDrop.
+	limits := ResourceLimits{
+		TimeSeconds: timeout,
+		UID:         NoPrivilegeDrop,
+		GID:         NoPrivilegeDrop,
+	}
 	if opts.Limits != nil {
 		// The doc-set time limit is honored through the
 		// timeout argument. We merge the caller's
@@ -321,10 +329,19 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 	if opts.InheritEnv {
 		env = append(env, os.Environ()...)
 	}
-	env = append(env, formatEnv(opts.Env)...)
-	if true { // TEMP-REVERT-PROBE
-		env = nil
+	// The base variables come next, so the caller's own Env wins
+	// over them (the overlay below is applied on top).
+	//
+	// This is what keeps a child able to START a program. Without
+	// a PATH the child cannot find anything by name, and the
+	// failure is quiet: `cmd /c echo hello` works because echo is
+	// built into cmd, while `cmd /c git --version` fails with
+	// "'git' is not recognized". See child_path.go.
+	base := childBaseEnv()
+	for k, v := range base {
+		env = append(env, k+"="+v)
 	}
+	env = append(env, formatEnv(opts.Env)...)
 	// The network policy is applied LAST, so its proxy
 	// variables win over anything the caller or the parent
 	// environment supplied. A child that could read a

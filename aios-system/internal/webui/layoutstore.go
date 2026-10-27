@@ -2,8 +2,11 @@ package webui
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // LayoutStore persists an operator's panel arrangement.
@@ -66,7 +69,7 @@ func (s *LayoutStore) Load() (Layout, bool, error) {
 	}
 	data, err := os.ReadFile(s.path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if isNoLayoutFile(err) {
 			return DefaultLayout(), false, nil
 		}
 		// Report the error but still hand back a usable
@@ -129,4 +132,44 @@ func (s *LayoutStore) Save(l Layout) error {
 		return err
 	}
 	return nil
+}
+
+// isNoLayoutFile reports whether err means "there is no layout
+// file here" -- the ordinary first-run case -- rather than
+// "something is wrong with the layout file".
+//
+// The check has to name more than os.IsNotExist, because the two
+// platforms disagree about what a path whose parent is a regular
+// file reports:
+//
+//   - Windows returns ERROR_PATH_NOT_FOUND, which os.IsNotExist
+//     recognises.
+//   - Linux returns ENOTDIR, which it does not.
+//
+// So a store pointed at a path that cannot exist was "nothing
+// saved yet" on Windows and a hard error on Linux. The visible
+// effect was that the same test passed on Windows and failed on
+// Linux CI, and that a layout file in an unreachable place took
+// the whole UI down with it on one platform and not the other.
+//
+// The rule is the one the user cares about: if the file is not
+// there, there is no saved layout, and the server starts with the
+// defaults. A file that IS there but cannot be read is still an
+// error, and is still reported.
+func isNoLayoutFile(err error) bool {
+	if err == nil {
+		return false
+	}
+	if os.IsNotExist(err) {
+		return true
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	// ENOTDIR: a component of the path is not a directory, so
+	// there is no file to read.
+	if errors.Is(err, syscall.ENOTDIR) {
+		return true
+	}
+	return false
 }
