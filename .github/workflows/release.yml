@@ -95,11 +95,24 @@ jobs:
         # release notes, the installer, and the binary all name
         # the same string. The commit is stamped too, because two
         # builds from the same tag can differ.
+        #
+        # $env:TAG, not $TAG.
+        #
+        # This runner is PowerShell, not bash. In bash, `$TAG`
+        # expands from the environment. In PowerShell, `$TAG`
+        # expands from a LOCAL VARIABLE named TAG, and the step's
+        # `env:` block sets an ENVIRONMENT variable, which
+        # PowerShell reaches as `$env:TAG`.
+        #
+        # So `$TAG` was empty, the linker was handed
+        # `-X ...version.Version=` with nothing after it, and it
+        # accepted that silently. The binary reported "aios" -- with
+        # no version at all -- and the build passed.
+        #
+        # The check below caught it, which is what it is for.
         run: >
           go build -trimpath
-          -ldflags="-s -w
-          -X github.com/Hamidullah02/aios/aios-system/internal/version.Version=$TAG
-          -X github.com/Hamidullah02/aios/aios-system/internal/version.Commit=$COMMIT"
+          -ldflags="-s -w -X github.com/Hamidullah02/aios/aios-system/internal/version.Version=$env:TAG -X github.com/Hamidullah02/aios/aios-system/internal/version.Commit=$env:COMMIT"
           -o aios.exe ./cmd/aios
 
       - name: Check the binary reports the tag it was built from
@@ -225,6 +238,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "aios-system/$TAG" "$GITHUB_SHA"
-          git push --force origin "refs/tags/aios-system/$TAG"
-          echo "tagged aios-system/$TAG at $GITHUB_SHA"
+          git tag -f "aios-system/$env:TAG" "$env:GITHUB_SHA"
+          git push --force origin "refs/tags/aios-system/$env:TAG"
+          echo "tagged aios-system/$env:TAG at $env:GITHUB_SHA"
