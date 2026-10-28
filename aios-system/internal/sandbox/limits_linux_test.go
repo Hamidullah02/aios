@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"os"
+	"os/exec"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -40,29 +41,19 @@ func TestParentLimitsRestoredAfterApply(t *testing.T) {
 // kernel behaviour are: the limit counts processes for the
 // real UID, and macOS has no equivalent.
 //
-// The limit is relative to what the real UID already has, because
-// the kernel compares the UID's total task count against it. See
-// processBudget.
+// The limit is applied to the CHILD with prlimit, not to the
+// parent. The parent's own limits are the parent's business: a
+// parent that cannot allocate cannot run the next task.
 func TestProcessLimitIsAppliedOnLinux(t *testing.T) {
-	saveParentLimits()
-	defer restoreParentLimits()
-
 	existing, ok := countProcessesForUID(os.Getuid())
 	if !ok {
 		t.Skip("cannot count the processes for this uid")
 	}
 
 	limits := ResourceLimits{TimeSeconds: 60, Processes: 64}
-	if err := limits.applyLimits(); err != nil {
-		t.Fatalf("applyLimits: %v", err)
-	}
-	r, err := getRlimit(unix.RLIMIT_NPROC)
-	if err != nil {
-		t.Fatalf("getrlimit: %v", err)
-	}
-	want := existing + 64
-	if r.Cur != want {
-		t.Fatalf("nproc = %d, want %d (the %d processes the uid already had, plus 64)", r.Cur, want, existing)
+	budget := limits.processBudget()
+	if budget != existing+64 {
+		t.Fatalf("processBudget = %d, want %d", budget, existing+64)
 	}
 }
 
@@ -71,8 +62,8 @@ func TestProcessLimitIsAppliedOnLinux(t *testing.T) {
 //
 // The kernel compares the UID's TOTAL task count against
 // RLIMIT_NPROC, so an absolute limit of 4 is already exceeded on a
-// machine running more than four processes for that UID -- and the
-// runner's own fork then fails with EAGAIN.
+// machine running more than four tasks for that UID -- and the
+// fork fails with EAGAIN.
 //
 // That is what happened on CI: every job runs as the same 'runner'
 // uid, the limit of 4 was below the count the uid already had, and
@@ -110,6 +101,120 @@ func TestProcessBudgetFallsBackWhenTheCountFails(t *testing.T) {
 	}
 }
 
+// TestParentLimitsAreNotConstrained asserts that applying the
+// limits leaves the parent's own limits alone.
+//
+// This is the defect that made Linux unusable, and it was two
+// separate mistakes.
+//
+// The first was the hard limit. The runner used to set both the
+// soft and the hard limit in the parent. setrlimit(2): an
+// unprivileged process may lower the hard limit freely, but may
+// raise it only up to the previous hard limit. So the parent
+// lowered its own hard limit and could never lift it again -- and
+// restoreParentLimits, which tried to put it back, failed with
+// EPERM while its error was discarded with "_ =".
+//
+// The second was the address space. Go's fork uses clone(2) with
+// CLONE_VM, so the child shares the parent's address space until
+// it execs. A limit on the parent's address space is therefore a
+// limit on the parent's own Go runtime, which reserves a large
+// virtual arena. With RLIMIT_AS set to 1GB the runtime could not
+// allocate, and the process died with "fatal error: runtime:
+// cannot allocate memory".
+//
+// So the parent's limits are left alone now. The child's are
+// applied to the child, with prlimit.
+func TestParentLimitsAreNotConstrained(t *testing.T) {
+	saveParentLimits()
+	defer restoreParentLimits()
+
+	before, err := getRlimit(unix.RLIMIT_AS)
+	if err != nil {
+		t.Fatalf("getrlimit: %v", err)
+	}
+	beforeNproc, err := getRlimit(unix.RLIMIT_NPROC)
+	if err != nil {
+		t.Fatalf("getrlimit: %v", err)
+	}
+
+	limits := ResourceLimits{TimeSeconds: 60, Processes: 4, MemoryBytes: 1 << 20}
+	if err := limits.applyLimits(); err != nil {
+		t.Fatalf("applyLimits: %v", err)
+	}
+
+	after, err := getRlimit(unix.RLIMIT_AS)
+	if err != nil {
+		t.Fatalf("getrlimit: %v", err)
+	}
+	if after.Cur != before.Cur || after.Max != before.Max {
+		t.Errorf("the parent's address-space limit changed: %+v -> %+v", before, after)
+	}
+	afterNproc, err := getRlimit(unix.RLIMIT_NPROC)
+	if err != nil {
+		t.Fatalf("getrlimit: %v", err)
+	}
+	if afterNproc.Cur != beforeNproc.Cur || afterNproc.Max != beforeNproc.Max {
+		t.Errorf("the parent's process-count limit changed: %+v -> %+v", beforeNproc, afterNproc)
+	}
+}
+
+// TestApplyChildLimitsDoesNotTouchTheParent asserts that the
+// child's limits are applied to the child and to nobody else.
+//
+// The child here is a real process, so the limits have somewhere
+// to land. The parent's own limits must be untouched.
+func TestApplyChildLimitsDoesNotTouchTheParent(t *testing.T) {
+	saveParentLimits()
+	defer restoreParentLimits()
+
+	before, err := getRlimit(unix.RLIMIT_AS)
+	if err != nil {
+		t.Fatalf("getrlimit: %v", err)
+	}
+
+	// Start a child that does nothing.
+	cmd := exec.Command("/bin/sh", "-c", "sleep 5")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	limits := ResourceLimits{TimeSeconds: 60, MemoryBytes: 1 << 30, Processes: 8}
+	if err := applyChildLimits(cmd.Process.Pid, &limits); err != nil {
+		t.Fatalf("applyChildLimits: %v", err)
+	}
+
+	after, err := getRlimit(unix.RLIMIT_AS)
+	if err != nil {
+		t.Fatalf("getrlimit: %v", err)
+	}
+	if after.Cur != before.Cur || after.Max != before.Max {
+		t.Errorf("the parent's address-space limit changed: %+v -> %+v", before, after)
+	}
+
+	// And the child has the limit.
+	childLimit, err := getChildRlimit(cmd.Process.Pid, unix.RLIMIT_AS)
+	if err != nil {
+		t.Fatalf("get child rlimit: %v", err)
+	}
+	if childLimit.Cur != 1<<30 {
+		t.Errorf("the child's address-space limit = %d, want %d", childLimit.Cur, 1<<30)
+	}
+}
+
+// getChildRlimit reads a limit from another process.
+func getChildRlimit(pid, which int) (unix.Rlimit, error) {
+	var r unix.Rlimit
+	if err := unix.Prlimit(pid, which, nil, &r); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
 // TestStatusBelongsToUID pins the parsing of a /proc status file.
 //
 // The real uid is the first number on the "Uid:" line, and it is
@@ -137,115 +242,4 @@ func TestStatusBelongsToUID(t *testing.T) {
 	}
 }
 
-
-// TestHardLimitIsNotLoweredInTheParent asserts that the runner
-// leaves the hard limit alone.
-//
-// The runner sets the limit in the PARENT, because Go's exec has
-// no way to set a rlimit in the child and the child inherits the
-// parent's.
-//
-// Lowering the HARD limit there is not recoverable. setrlimit(2):
-// an unprivileged process may lower the hard limit freely, but
-// may raise it only up to the previous hard limit. So the parent
-// could never put it back, and restoreParentLimits failed with
-// EPERM while its error was discarded.
-//
-// The effect was severe, and it was invisible on a machine where
-// the account is the only user of it:
-//
-//   - RLIMIT_NPROC counts every process belonging to the real
-//     uid. On a shared-uid CI runner the parent's own limit
-//     applied to the whole machine, and the next fork failed with
-//     EAGAIN: "resource temporarily unavailable".
-//   - RLIMIT_AS stopped the Go runtime from allocating, and the
-//     process died with "fatal error: runtime: cannot allocate
-//     memory".
-//
-// So the hard limit stays where it is, and the soft limit is the
-// one that carries the bound.
-func TestHardLimitIsNotLoweredInTheParent(t *testing.T) {
-	if canRestoreHardLimit() {
-		t.Skip("this process can raise a hard limit, so it is expected to set one")
-	}
-
-	saveParentLimits()
-	defer restoreParentLimits()
-
-	before, err := getRlimit(unix.RLIMIT_NPROC)
-	if err != nil {
-		t.Fatalf("getrlimit: %v", err)
-	}
-
-	limits := ResourceLimits{TimeSeconds: 60, Processes: 4, MemoryBytes: 1 << 20}
-	if err := limits.applyLimits(); err != nil {
-		t.Fatalf("applyLimits: %v", err)
-	}
-
-	after, err := getRlimit(unix.RLIMIT_NPROC)
-	if err != nil {
-		t.Fatalf("getrlimit: %v", err)
-	}
-	if after.Max != before.Max {
-		t.Errorf("nproc hard limit changed: %d -> %d", before.Max, after.Max)
-	}
-	if after.Cur != 4 {
-		t.Errorf("nproc soft limit = %d, want 4", after.Cur)
-	}
-
-	// And the restore must actually work, which it could not
-	// when the hard limit had been lowered.
-	restoreParentLimits()
-	restored, err := getRlimit(unix.RLIMIT_NPROC)
-	if err != nil {
-		t.Fatalf("getrlimit: %v", err)
-	}
-	if restored.Cur != before.Cur {
-		t.Errorf("nproc soft limit was not restored: %d, want %d", restored.Cur, before.Cur)
-	}
-	if restored.Max != before.Max {
-		t.Errorf("nproc hard limit was not restored: %d, want %d", restored.Max, before.Max)
-	}
-}
-
-// TestAddressSpaceLimitIsRestorable asserts the same for
-// RLIMIT_AS, which is the limit that killed the Go runtime.
-func TestAddressSpaceLimitIsRestorable(t *testing.T) {
-	if canRestoreHardLimit() {
-		t.Skip("this process can raise a hard limit, so it is expected to set one")
-	}
-
-	saveParentLimits()
-	defer restoreParentLimits()
-
-	before, err := getRlimit(unix.RLIMIT_AS)
-	if err != nil {
-		t.Fatalf("getrlimit: %v", err)
-	}
-
-	limits := ResourceLimits{TimeSeconds: 60, MemoryBytes: 1 << 20}
-	if err := limits.applyLimits(); err != nil {
-		t.Fatalf("applyLimits: %v", err)
-	}
-
-	after, err := getRlimit(unix.RLIMIT_AS)
-	if err != nil {
-		t.Fatalf("getrlimit: %v", err)
-	}
-	if after.Max != before.Max {
-		t.Errorf("as hard limit changed: %d -> %d", before.Max, after.Max)
-	}
-	if after.Cur != 1<<20 {
-		t.Errorf("as soft limit = %d, want %d", after.Cur, 1<<20)
-	}
-
-	restoreParentLimits()
-	restored, err := getRlimit(unix.RLIMIT_AS)
-	if err != nil {
-		t.Fatalf("getrlimit: %v", err)
-	}
-	if restored.Cur != before.Cur {
-		t.Errorf("as soft limit was not restored: %d, want %d", restored.Cur, before.Cur)
-	}
-}
 

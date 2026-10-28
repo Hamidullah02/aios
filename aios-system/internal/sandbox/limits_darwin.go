@@ -166,3 +166,33 @@ func (l ResourceLimits) hardLimit(which int, soft uint64) uint64 {
 func canRestoreHardLimit() bool {
 	return os.Geteuid() == 0
 }
+
+// applyChildLimits applies the limits that belong to the child
+// rather than to the parent.
+//
+// # macOS has no prlimit(2)
+//
+// Linux can set another process's limits with prlimit, so the
+// child's limits are applied there without touching the parent at
+// all. macOS has no such call -- only setrlimit, which acts on
+// the caller.
+//
+// So on macOS the limit is set in the PARENT, before the fork,
+// and the child inherits it. That is safe here, and only here,
+// because of how Go starts a process on macOS: it uses the
+// ordinary fork(2), not clone(2) with CLONE_VM. The child gets its
+// own address space, so the parent's address-space limit is not
+// the child's -- it is the limit the child inherits, and the
+// parent is left with a limit it set itself.
+//
+// The parent restores its own limit immediately after the fork,
+// which the runner does through saveParentLimits and
+// restoreParentLimits.
+//
+// The process-count limit is not applied: macOS has no
+// RLIMIT_NPROC.
+func applyChildLimits(pid int, l *ResourceLimits) error {
+	// The limit is applied by the parent before the fork; there
+	// is nothing to do once the child has started.
+	return nil
+}

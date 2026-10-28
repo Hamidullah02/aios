@@ -17,3 +17,15 @@ func restoreParentLimits() {}
 func (l ResourceLimits) applyLimits() error {
 	return nil
 }
+
+// applyChildLimits is a no-op on Windows.
+//
+// The Job Object is the kernel-enforced boundary there, and it
+// already carries the process-count and memory limits: it caps
+// the number of processes in the job and the total committed
+// memory across it. The Job Object bounds the child without
+// touching the parent, which is what the POSIX path uses
+// prlimit to achieve.
+func applyChildLimits(pid int, l *ResourceLimits) error {
+	return nil
+}

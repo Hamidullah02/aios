@@ -469,6 +469,18 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 			return SandboxResult{}, &SandboxError{Op: "resume child", Err: err}
 		}
 	}
+	// The child's own limits. On POSIX these are applied with
+	// prlimit, which touches only the child: the parent's address
+	// space and process count are the parent's own business, and
+	// a parent that cannot allocate cannot run the next task.
+	//
+	// On Windows the Job Object has already bounded the child, so
+	// the call is a no-op there.
+	if err := applyChildLimits(cmd.Process.Pid, &limits); err != nil {
+		killProcessTree(cmd, job)
+		restoreParentLimits()
+		return SandboxResult{}, &SandboxError{Op: "limit child", Err: err}
+	}
 
 	waitErr := cmd.Wait()
 	restoreParentLimits()

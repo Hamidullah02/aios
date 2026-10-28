@@ -122,36 +122,78 @@ func getRlimit(which int) (unix.Rlimit, error) {
 // When the runner does have the privilege to put a hard limit
 // back -- that is, when it is root -- it sets both, and the
 // child's bound is one it cannot lift.
+// applyLimits applies the resource limits that are safe to apply
+// to the parent.
+//
+// # On Linux the parent gets no limits at all
+//
+// The runner starts the child with clone(2) and CLONE_VM, so the
+// child shares the parent's address space until it execs. Every
+// limit set on the parent is therefore also a limit on the child
+// -- and, far worse, on the parent's own Go runtime, which
+// reserves a large virtual arena.
+//
+// Setting RLIMIT_AS in the parent therefore made the runtime fail
+// to allocate, and the process died with "fatal error: runtime:
+// cannot allocate memory". Setting RLIMIT_NPROC in the parent
+// counted the parent's own tasks against the limit, and the
+// runner's own fork failed with EAGAIN.
+//
+// So the parent's limits are left alone. The child's limits are
+// applied to the child, after it has started, with prlimit(2).
+// See applyChildLimits.
+//
+// The child is a separate process once it has exec'd, so a limit
+// set on it with prlimit is its own, and the parent is
+// unconstrained. That is the same arrangement the Windows Job
+// Object gives for free.
 func (l ResourceLimits) applyLimits() error {
-	// RLIMIT_CPU is enforced in seconds. The kernel rounds up
-	// to the next second, so a 1s limit is honored as expected.
+	// The CPU limit is applied to the child with prlimit, like
+	// the others. RLIMIT_CPU is a per-process CPU-time counter
+	// and the child inherits the parent's, so it needs no
+	// special handling.
+	return nil
+}
+
+// applyChildLimits applies the limits that belong to the child
+// rather than to the parent.
+//
+// It is called after the child has started, with the child's pid.
+// prlimit(2) can set another process's limits without touching
+// the caller, so the parent stays unconstrained.
+//
+// The memory limit is applied as RLIMIT_AS. The child is a fresh
+// process after exec, so it has its own address space and the
+// limit is its own.
+//
+// The process limit is applied as RLIMIT_NPROC, made relative to
+// the tasks the UID already has. See processBudget.
+func applyChildLimits(pid int, l *ResourceLimits) error {
+	if l == nil {
+		return nil
+	}
 	if l.CPUSeconds > 0 {
-		if err := unix.Setrlimit(unix.RLIMIT_CPU, &unix.Rlimit{
+		if err := unix.Prlimit(pid, unix.RLIMIT_CPU, &unix.Rlimit{
 			Cur: uint64(l.CPUSeconds),
-			Max: l.hardLimit(unix.RLIMIT_CPU, uint64(l.CPUSeconds)),
-		}); err != nil {
+			Max: uint64(l.CPUSeconds),
+		}, nil); err != nil {
 			return &LimitsError{Field: "cpu_seconds", Reason: err.Error()}
 		}
 	}
-	// RLIMIT_AS is the address-space limit. A non-zero value
-	// is honored in bytes.
 	if l.MemoryBytes > 0 {
-		if err := unix.Setrlimit(unix.RLIMIT_AS, &unix.Rlimit{
+		if err := unix.Prlimit(pid, unix.RLIMIT_AS, &unix.Rlimit{
 			Cur: uint64(l.MemoryBytes),
-			Max: l.hardLimit(unix.RLIMIT_AS, uint64(l.MemoryBytes)),
-		}); err != nil {
+			Max: uint64(l.MemoryBytes),
+		}, nil); err != nil {
 			return &LimitsError{Field: "memory_bytes", Reason: err.Error()}
 		}
 	}
-	// RLIMIT_NPROC is the process count limit. On Linux the
-	// limit applies to the real UID, not the calling process, so
-	// the budget has to be made relative to what that UID already
-	// has. See processBudget.
 	if l.Processes > 0 {
-		if err := unix.Setrlimit(unix.RLIMIT_NPROC, &unix.Rlimit{
-			Cur: l.processBudget(),
-			Max: l.hardLimit(unix.RLIMIT_NPROC, l.processBudget()),
-		}); err != nil {
+		budget := l.processBudget()
+		if err := unix.Prlimit(pid, unix.RLIMIT_NPROC, &unix.Rlimit{
+			Cur: budget,
+			Max: budget,
+		}, nil); err != nil {
 			return &LimitsError{Field: "processes", Reason: err.Error()}
 		}
 	}
@@ -196,11 +238,24 @@ func (l ResourceLimits) processBudget() uint64 {
 	return total
 }
 
-// countProcessesForUID counts the processes belonging to uid.
+// countProcessesForUID counts the tasks belonging to uid.
 //
 // It walks /proc, and for each numeric entry reads the process's
-// status file and looks at the real-uid field. The count matches
-// the kernel's own accounting, which counts tasks by real uid.
+// status file and looks at the real-uid field.
+//
+// # The count is of TASKS, not of processes
+//
+// RLIMIT_NPROC counts threads as well as processes. The kernel
+// keeps a per-user count that is incremented for every new task,
+// and a thread is a task. So a Go program with forty goroutine
+// threads is forty tasks, and the budget has to leave room for
+// them.
+//
+// The status file carries a "Threads:" line, so the count is the
+// sum of the thread counts of the processes belonging to the uid.
+// Counting only the /proc entries -- one per process -- undercounts
+// badly, and the limit ends up already exceeded: the fork fails
+// with EAGAIN, "resource temporarily unavailable".
 //
 // The second return value is false when the count could not be
 // taken, which the caller treats as "do not trust a relative
@@ -223,11 +278,36 @@ func countProcessesForUID(uid int) (uint64, bool) {
 			// count is a snapshot.
 			continue
 		}
-		if statusBelongsToUID(status, uid) {
-			count++
+		if !statusBelongsToUID(status, uid) {
+			continue
 		}
+		count += statusThreadCount(status)
 	}
 	return count, true
+}
+
+// statusThreadCount returns the number of tasks the process has.
+//
+// The "Threads:" line of a /proc status file carries it. A status
+// file without the line counts as one task, which is the
+// conservative answer for a process that has not reported yet.
+func statusThreadCount(status []byte) uint64 {
+	const prefix = "Threads:"
+	for _, line := range splitLines(status) {
+		if len(line) < len(prefix) || string(line[:len(prefix)]) != prefix {
+			continue
+		}
+		fields := splitFields(string(line[len(prefix):]))
+		if len(fields) == 0 {
+			return 1
+		}
+		n, err := parseInt(fields[0])
+		if err != nil || n < 1 {
+			return 1
+		}
+		return uint64(n)
+	}
+	return 1
 }
 
 // statusBelongsToUID reports whether a /proc/<pid>/status file
@@ -307,47 +387,4 @@ func parseInt(s string) (int, error) {
 		n = n*10 + int(s[i]-'0')
 	}
 	return n, nil
-}
-
-// hardLimit returns the hard limit to pair with a soft limit.
-//
-// A process that can raise a hard limit it has lowered -- that
-// is, one with CAP_SYS_RESOURCE, which root has -- gets the same
-// value, so the child's bound cannot be lifted.
-//
-// Every other process gets the current hard limit, unchanged. A
-// soft limit above the hard limit would be refused by the
-// kernel with EPERM, so the soft limit is clamped to it.
-func (l ResourceLimits) hardLimit(which int, soft uint64) uint64 {
-	current, err := getRlimit(which)
-	if err != nil {
-		// Without the current value the safe answer is the
-		// soft limit itself: it is what the caller asked for,
-		// and if the kernel refuses it, the caller hears about
-		// it here rather than silently running unbounded.
-		return soft
-	}
-	if canRestoreHardLimit() {
-		return soft
-	}
-	if current.Max != unix.RLIM_INFINITY && soft > current.Max {
-		return current.Max
-	}
-	return current.Max
-}
-
-// canRestoreHardLimit reports whether this process is able to
-// raise a hard limit it has lowered.
-//
-// setrlimit(2): an unprivileged process may lower the hard
-// limit freely, but may raise it only up to the previous hard
-// limit. So a process that lowers its own hard limit can never
-// raise it again, and the runner could not put the parent's
-// limit back.
-//
-// A process with CAP_SYS_RESOURCE -- which root has -- can raise
-// it. That is the only case where the runner may set the hard
-// limit too.
-func canRestoreHardLimit() bool {
-	return os.Geteuid() == 0
 }
