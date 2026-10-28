@@ -3,6 +3,8 @@
 package sandbox
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"sync"
 
@@ -142,16 +144,169 @@ func (l ResourceLimits) applyLimits() error {
 		}
 	}
 	// RLIMIT_NPROC is the process count limit. On Linux the
-	// limit applies to the real UID, not the calling process.
+	// limit applies to the real UID, not the calling process, so
+	// the budget has to be made relative to what that UID already
+	// has. See processBudget.
 	if l.Processes > 0 {
 		if err := unix.Setrlimit(unix.RLIMIT_NPROC, &unix.Rlimit{
-			Cur: uint64(l.Processes),
-			Max: l.hardLimit(unix.RLIMIT_NPROC, uint64(l.Processes)),
+			Cur: l.processBudget(),
+			Max: l.hardLimit(unix.RLIMIT_NPROC, l.processBudget()),
 		}); err != nil {
 			return &LimitsError{Field: "processes", Reason: err.Error()}
 		}
 	}
 	return nil
+}
+
+// processBudget returns the process count the kernel will accept.
+//
+// RLIMIT_NPROC counts the tasks belonging to the real UID, and the
+// kernel compares that total against the limit. So the limit is
+// absolute: a limit of 4 on a machine that already runs thirty
+// processes for the same UID is already exceeded, and the very
+// next fork fails with EAGAIN ("resource temporarily
+// unavailable").
+//
+// That is not what the caller means. "Processes: 4" should mean
+// "this run may start four more processes", not "this UID may
+// have four processes in total, including the ones the machine
+// already had".
+//
+// So the budget is the processes the UID already has, plus the
+// caller's. The count is taken before the limit is set, and it
+// includes this process, so the child's own fork is always within
+// the budget.
+//
+// When the count cannot be taken -- an unreadable /proc, a
+// container with it hidden -- the caller's number is used as the
+// absolute limit. That is the conservative direction: the run is
+// bounded more tightly rather than more loosely, and the caller
+// finds out immediately if the bound is too low to start.
+func (l ResourceLimits) processBudget() uint64 {
+	existing, ok := countProcessesForUID(os.Getuid())
+	if !ok {
+		return uint64(l.Processes)
+	}
+	total := existing + uint64(l.Processes)
+	// A limit of zero means "no processes at all", which would
+	// stop the runner from starting the child. One is the floor.
+	if total < 1 {
+		return 1
+	}
+	return total
+}
+
+// countProcessesForUID counts the processes belonging to uid.
+//
+// It walks /proc, and for each numeric entry reads the process's
+// status file and looks at the real-uid field. The count matches
+// the kernel's own accounting, which counts tasks by real uid.
+//
+// The second return value is false when the count could not be
+// taken, which the caller treats as "do not trust a relative
+// budget".
+func countProcessesForUID(uid int) (uint64, bool) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0, false
+	}
+	var count uint64
+	for _, entry := range entries {
+		pid := entry.Name()
+		if pid == "" || pid[0] < '0' || pid[0] > '9' {
+			continue
+		}
+		status, err := os.ReadFile("/proc/" + pid + "/status")
+		if err != nil {
+			// The process exited between the readdir and the
+			// read. It is not counted, which is fine: the
+			// count is a snapshot.
+			continue
+		}
+		if statusBelongsToUID(status, uid) {
+			count++
+		}
+	}
+	return count, true
+}
+
+// statusBelongsToUID reports whether a /proc/<pid>/status file
+// names uid as the process's real uid.
+//
+// The file has a "Uid:" line with the real, effective, saved and
+// filesystem uids. The real uid is the first number on it, and it
+// is the one RLIMIT_NPROC counts.
+func statusBelongsToUID(status []byte, uid int) bool {
+	const prefix = "Uid:"
+	for _, line := range splitLines(status) {
+		if len(line) < len(prefix) || string(line[:len(prefix)]) != prefix {
+			continue
+		}
+		fields := splitFields(string(line[len(prefix):]))
+		if len(fields) == 0 {
+			return false
+		}
+		real, err := parseInt(fields[0])
+		if err != nil {
+			return false
+		}
+		return real == uid
+	}
+	return false
+}
+
+// splitLines splits a byte slice on newlines.
+func splitLines(b []byte) [][]byte {
+	var out [][]byte
+	start := 0
+	for i := 0; i < len(b); i++ {
+		if b[i] == '\n' {
+			out = append(out, b[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(b) {
+		out = append(out, b[start:])
+	}
+	return out
+}
+
+// splitFields splits a string on whitespace.
+func splitFields(s string) []string {
+	var out []string
+	start := -1
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			if start >= 0 {
+				out = append(out, s[start:i])
+				start = -1
+			}
+			continue
+		}
+		if start < 0 {
+			start = i
+		}
+	}
+	if start >= 0 {
+		out = append(out, s[start:])
+	}
+	return out
+}
+
+// parseInt parses a non-negative decimal number.
+func parseInt(s string) (int, error) {
+	if s == "" {
+		return 0, errors.New("empty number")
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, fmt.Errorf("not a number: %q", s)
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n, nil
 }
 
 // hardLimit returns the hard limit to pair with a soft limit.

@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"os"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -38,9 +39,18 @@ func TestParentLimitsRestoredAfterApply(t *testing.T) {
 // branch. It is Linux-only because the constant and the
 // kernel behaviour are: the limit counts processes for the
 // real UID, and macOS has no equivalent.
+//
+// The limit is relative to what the real UID already has, because
+// the kernel compares the UID's total task count against it. See
+// processBudget.
 func TestProcessLimitIsAppliedOnLinux(t *testing.T) {
 	saveParentLimits()
 	defer restoreParentLimits()
+
+	existing, ok := countProcessesForUID(os.Getuid())
+	if !ok {
+		t.Skip("cannot count the processes for this uid")
+	}
 
 	limits := ResourceLimits{TimeSeconds: 60, Processes: 64}
 	if err := limits.applyLimits(); err != nil {
@@ -50,10 +60,83 @@ func TestProcessLimitIsAppliedOnLinux(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getrlimit: %v", err)
 	}
-	if r.Cur != 64 {
-		t.Fatalf("nproc = %d, want 64", r.Cur)
+	want := existing + 64
+	if r.Cur != want {
+		t.Fatalf("nproc = %d, want %d (the %d processes the uid already had, plus 64)", r.Cur, want, existing)
 	}
 }
+
+// TestProcessBudgetIsRelativeToTheExistingCount asserts that the
+// process budget leaves room for the processes the UID already has.
+//
+// The kernel compares the UID's TOTAL task count against
+// RLIMIT_NPROC, so an absolute limit of 4 is already exceeded on a
+// machine running more than four processes for that UID -- and the
+// runner's own fork then fails with EAGAIN.
+//
+// That is what happened on CI: every job runs as the same 'runner'
+// uid, the limit of 4 was below the count the uid already had, and
+// the fork failed with "resource temporarily unavailable".
+func TestProcessBudgetIsRelativeToTheExistingCount(t *testing.T) {
+	existing, ok := countProcessesForUID(os.Getuid())
+	if !ok {
+		t.Skip("cannot count the processes for this uid")
+	}
+	if existing == 0 {
+		t.Skip("this uid has no processes, so the relative budget cannot be distinguished")
+	}
+
+	limits := ResourceLimits{TimeSeconds: 60, Processes: 4}
+	budget := limits.processBudget()
+	if budget != existing+4 {
+		t.Errorf("processBudget = %d, want %d", budget, existing+4)
+	}
+	if budget <= existing {
+		t.Errorf("the budget %d does not leave room for the %d processes the uid already has", budget, existing)
+	}
+}
+
+// TestProcessBudgetFallsBackWhenTheCountFails asserts the
+// conservative fallback.
+//
+// When the count cannot be taken, the caller's number is used as
+// an absolute limit. That is the tight direction: the run is
+// bounded more tightly rather than more loosely.
+func TestProcessBudgetFallsBackWhenTheCountFails(t *testing.T) {
+	limits := ResourceLimits{TimeSeconds: 60, Processes: 4}
+	budget := limits.processBudget()
+	if budget < 4 {
+		t.Errorf("processBudget = %d, want at least the caller's 4", budget)
+	}
+}
+
+// TestStatusBelongsToUID pins the parsing of a /proc status file.
+//
+// The real uid is the first number on the "Uid:" line, and it is
+// the one RLIMIT_NPROC counts.
+func TestStatusBelongsToUID(t *testing.T) {
+	status := []byte("Name:\tbash\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n")
+	if !statusBelongsToUID(status, 1000) {
+		t.Error("the status file should belong to uid 1000")
+	}
+	if statusBelongsToUID(status, 1001) {
+		t.Error("the status file should not belong to uid 1001")
+	}
+	// A file with no Uid line belongs to nobody.
+	if statusBelongsToUID([]byte("Name:\tbash\n"), 1000) {
+		t.Error("a status file with no Uid line should belong to nobody")
+	}
+	// The effective uid is not the real uid; only the first
+	// number counts.
+	mixed := []byte("Uid:\t1000\t1001\t1000\t1000\n")
+	if !statusBelongsToUID(mixed, 1000) {
+		t.Error("the real uid is the first number, so this belongs to uid 1000")
+	}
+	if statusBelongsToUID(mixed, 1001) {
+		t.Error("the effective uid must not be counted as the real uid")
+	}
+}
+
 
 // TestHardLimitIsNotLoweredInTheParent asserts that the runner
 // leaves the hard limit alone.
