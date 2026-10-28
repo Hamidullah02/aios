@@ -200,10 +200,39 @@ type SandboxResult struct {
 type SandboxError struct {
 	Op  string
 	Err error
+	// ChildStderr is what the child wrote to stderr before it
+	// died, when the failure was the child's.
+	//
+	// Without it a child that dies of its own accord reports only
+	// "exit status 2", which says nothing about why. A Go child
+	// that hits a limit exits 2 and writes the reason to stderr:
+	// "fatal error: runtime: cannot allocate memory". The
+	// operator needs that line, and so did this project's own
+	// CI, which spent several runs failing on "exit status 2"
+	// with the cause nowhere in the log.
+	ChildStderr string
 }
 
 func (e *SandboxError) Error() string {
-	return fmt.Sprintf("sandbox: %s: %v.", e.Op, e.Err)
+	if e.ChildStderr == "" {
+		return fmt.Sprintf("sandbox: %s: %v.", e.Op, e.Err)
+	}
+	return fmt.Sprintf("sandbox: %s: %v: %s.", e.Op, e.Err, firstLine(e.ChildStderr))
+}
+
+// firstLine returns the first non-empty line of s.
+//
+// The child's stderr is usually several lines of Go runtime
+// output. The first one carries the reason; the rest is the
+// goroutine dump, which is far too long for an error message.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (e *SandboxError) Unwrap() error { return e.Err }
@@ -519,9 +548,8 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 			Stdout:     stdout.String(),
 			Stderr:     stderr.String(),
 			DurationMs: durationMs,
-		}, &SandboxError{Op: "wait", Err: waitErr}
+		}, &SandboxError{Op: "wait", Err: waitErr, ChildStderr: stderr.String()}
 	}
-
 	return SandboxResult{
 		ExitCode:   cmd.ProcessState.ExitCode(),
 		Stdout:     stdout.String(),
