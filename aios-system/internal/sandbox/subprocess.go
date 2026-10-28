@@ -406,7 +406,7 @@ func (r *SubprocessRunner) Run(opts RunOptions) (SandboxResult, error) {
 	// grandchildren running past the timeout.
 	configureProcessGroup(cmd)
 	// Namespace isolation. On Linux the child is put in its own
-	// user, network, mount and pid namespaces. The probe below
+	// user, mount and pid namespaces. The probe below
 	// degrades to the weaker isolation when the kernel or the
 	// container does not allow them, because refusing to run at
 	// all would be worse than running with less isolation.

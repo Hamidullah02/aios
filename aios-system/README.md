@@ -190,9 +190,7 @@ host that is not on the list is refused before a socket is opened.
 `HTTP_PROXY`, opens a raw socket, or speaks a protocol other than
 HTTP is not stopped by the proxy. The honest claim is: *a
 well-behaved child in a gated tool call can only reach the hosts you
-listed*. On Linux the network namespace is a second, stronger
-layer -- see **Process isolation** below -- but on macOS and
-Windows the proxy is the only network boundary.
+listed*. The proxy is the network boundary on every platform.
 
 ## Process isolation
 
@@ -218,12 +216,19 @@ What is in force either way:
 - **On Windows the kernel enforces the limits.** The Job Object
   caps the process count and the job's committed memory, and kills
   every process in the job when it closes.
-- **On Linux the child is in its own namespaces.** User, network,
-  mount and pid. The user namespace maps the child's uid 0 onto
-  an unprivileged uid on the host, so a child that finds a setuid
-  binary is confined to the identity you granted. The network
-  namespace gives the child an empty network stack, which is what
-  makes the egress proxy the only way out.
+- **On Linux the child is in its own namespaces.** User, mount and
+  pid. The user namespace maps the child's uid 0 onto an
+  unprivileged uid on the host, so a child that finds a setuid
+  binary is confined to the identity you granted. The mount
+  namespace gives the child its own filesystem view, and the pid
+  namespace makes the kernel reap the child's orphans.
+- **The network namespace is not used.** It would give the child
+  an empty network stack, but the egress proxy lives in the
+  parent's network namespace and a child in its own network
+  namespace cannot reach it. So the child would be offline rather
+  than fenced by the allow list, and the allow list would never
+  run. The proxy is the network boundary; that is deliberate, and
+  it is the same on every platform.
 
 **What this is not.** It is not a container. There is no chroot, no
 seccomp filter and no cgroup memory cap on Linux. A child in a

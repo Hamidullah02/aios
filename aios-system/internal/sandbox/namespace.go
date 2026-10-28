@@ -21,8 +21,10 @@ import "fmt"
 //     operator.
 //   - Network: the child gets its own empty network stack.
 //     No interface except loopback, no route to anywhere. This
-//     is what makes the egress proxy the only way out, and it
-//     is the strongest of the four.
+//     is off by default, because the egress proxy the child is
+//     supposed to use lives in the parent's namespace and a
+//     child in its own network namespace cannot reach it. See
+//     DefaultNamespacePolicy.
 //   - Mount: the child gets its own filesystem view. A mount
 //     the child makes does not affect the host.
 //   - PID: the child gets its own pid 1. The kernel reaps its
@@ -57,9 +59,39 @@ type NamespacePolicy struct {
 // DefaultNamespacePolicy returns the policy a Linux run uses.
 //
 // It is the exported form of the package default: the user,
-// network, mount and pid namespaces, all enabled.
+// mount and pid namespaces, all enabled.
+//
+// # The network namespace is off
+//
+// The network namespace is not in this default, and that is
+// deliberate.
+//
+// A child in its own network namespace has an empty network
+// stack: a loopback interface in the DOWN state, no address, no
+// route. It cannot reach anything in the parent's namespace --
+// including the egress proxy, which is bound to 127.0.0.1 in the
+// parent's namespace.
+//
+// The two are mutually exclusive as they stand. The product's
+// network boundary is the proxy, and a child that cannot reach
+// the proxy is not fenced by the proxy; it is merely offline.
+// The result was that on Linux every subprocess lost its network
+// entirely, and the allow-list enforcement never ran: the request
+// failed with "network is unreachable" rather than with the
+// proxy's 403.
+//
+// The network namespace only becomes the right boundary if the
+// child can still reach the proxy, which needs a veth pair
+// between the two namespaces and a proxy bound to the parent's
+// end of it. That is not implemented, so the honest thing is to
+// leave the network namespace off and say so.
+//
+// The user, mount and pid namespaces stay on. They do not
+// conflict with anything: the child's uid 0 still maps to the
+// operator's unprivileged uid, the child's mounts are still its
+// own, and the child's orphans are still reaped by the kernel.
 func DefaultNamespacePolicy() NamespacePolicy {
-	return NamespacePolicy{User: true, Network: true, Mount: true, PID: true}
+	return NamespacePolicy{User: true, Network: false, Mount: true, PID: true}
 }
 
 // Validate checks the policy is well-formed.

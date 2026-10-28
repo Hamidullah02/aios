@@ -17,8 +17,14 @@ import (
 //
 // A network namespace gives the child its own empty network
 // stack: no interfaces except loopback, no route to anywhere.
-// That is the strongest of the four, and it is what makes the
-// egress proxy the ONLY way out.
+//
+// It is not part of the default policy. The egress proxy the
+// child is supposed to use is bound to 127.0.0.1 in the parent's
+// network namespace, and a child in its own network namespace
+// cannot reach it -- its loopback is down and has no route. The
+// two are mutually exclusive, and the proxy is the boundary that
+// works, so the network namespace is off. See
+// DefaultNamespacePolicy.
 //
 // A mount namespace gives the child its own view of the
 // filesystem, so a mount the child makes does not affect the

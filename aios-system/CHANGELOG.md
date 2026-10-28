@@ -161,6 +161,56 @@ everywhere: if the file is not there, there is no saved layout and
 the server starts with the defaults. A file that *is* there and
 cannot be parsed is still an error, and is still reported.
 
+### The child could not reach the egress proxy on Linux
+
+**The network namespace and the proxy were mutually exclusive, and
+the proxy lost.** A child in its own network namespace has a
+loopback interface in the DOWN state: no address, no route, and a
+connect to `127.0.0.1` fails with `EHOSTUNREACH` -- "network is
+unreachable".
+
+The egress proxy is bound to `127.0.0.1` in the *parent's*
+network namespace. So a child in its own network namespace could
+not reach it. The result on Linux was that every subprocess had no
+network at all, and the allow list never ran: the request failed
+with "network is unreachable" rather than with the proxy's 403.
+
+The deny-mode test passed, but for the wrong reason -- the request
+failed at the child, which is what the test wanted to see, without
+the policy ever being consulted.
+
+The two are mutually exclusive as they stand. Making the network
+namespace work would need a veth pair between the two namespaces
+and a proxy bound to the parent's end of it; that is not
+implemented, and it would mean the proxy listens on a non-loopback
+address, which is a different trust model.
+
+So the network namespace is now **off**, and the proxy is the
+network boundary on every platform. The user, mount and pid
+namespaces stay on -- they do not conflict with anything, and they
+are the ones that do the containing:
+
+- the user's uid 0 still maps to the operator's unprivileged uid,
+  so a setuid binary is confined to the identity the operator
+  granted;
+- the mount namespace still gives the child its own filesystem view;
+- the pid namespace still makes the kernel reap the child's
+  orphans.
+
+The docs said the network namespace was "the strongest of the
+four" and "what makes the egress proxy the only way out". It was
+neither: it was a boundary that could not be reached, and it broke
+the one that worked. The README, the package doc, and the operator
+facing summary now say what is actually in force.
+
+### A test that only ran on Windows
+
+`TestBusWorker_ShellViaSandbox` ran `cmd /c echo hello`. On Linux
+the child failed with `exec: "cmd": executable file not found in
+$PATH`, so the test failed there and passed here. The command is
+now the test binary itself, invoked so it exits cleanly, which is
+a real executable on every platform and depends on no shell.
+
 ### Also in this release
 
 - The installers now print the version of the binary they actually

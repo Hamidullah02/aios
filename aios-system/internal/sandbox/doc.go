@@ -41,18 +41,24 @@
 //     own process group on POSIX, or its own Job Object on
 //     Windows, and the timeout kills the whole tree. A command
 //     that backgrounds work does not leave that work running.
-//   - On Linux the child runs in its own user, network, mount
-//     and pid namespaces. The user namespace maps the child's
-//     uid 0 onto an unprivileged uid on the host, and the
-//     network namespace gives the child an empty network stack.
+//   - On Linux the child runs in its own user, mount and pid
+//     namespaces. The user namespace maps the child's uid 0 onto
+//     an unprivileged uid on the host, the mount namespace gives
+//     the child its own filesystem view, and the pid namespace
+//     makes the kernel reap the child's orphans.
 //
 // # What the namespaces do not buy
 //
 // On Linux, a child in a user namespace is unprivileged with
 // respect to the host, but it is still root inside the namespace.
-// It can read every file the operator can read, and it has the
-// network namespace as its only network boundary. For a
-// hard guarantee, run the whole process inside a container.
+// It can read every file the operator can read, and the network
+// policy is its only network boundary. For a hard guarantee, run
+// the whole process inside a container.
+//
+// The network namespace is deliberately not used. The egress
+// proxy is the network boundary, and it is bound to loopback in
+// the parent's network namespace; a child in its own network
+// namespace cannot reach it. See DefaultNamespacePolicy.
 //
 // The Windows path is stronger than the Linux path in one
 // respect: the Job Object is a kernel-enforced boundary that a

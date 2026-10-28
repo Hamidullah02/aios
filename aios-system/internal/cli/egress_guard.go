@@ -322,7 +322,7 @@ func (g *EgressGuard) describeIsolation() string {
 	if g == nil || g.Namespaces == nil {
 		return "isolation: process group / job object only"
 	}
-	return "isolation: user, network, mount and pid namespaces"
+	return "isolation: user, mount and pid namespaces"
 }
 
 // allowRuleCount is the number of allow patterns in the list.

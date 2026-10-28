@@ -50,8 +50,11 @@ The run algorithm is:
 - Linux: the resource limits are applied through
   `syscall.Setrlimit` via `golang.org/x/sys/unix`. The CPU,
   memory, and process limits are honored. The runner also puts the
-  child in its own user, network, mount, and pid namespaces when
-  the kernel allows them.
+  child in its own user, mount, and pid namespaces when
+  the kernel allows them. The network namespace is not used: the
+  egress proxy is bound to loopback in the parent's network
+  namespace, and a child in its own network namespace cannot reach
+  it.
 - macOS: the resource limits are applied through
   `syscall.Setrlimit` via `golang.org/x/sys/unix`. The CPU and
   memory limits are honored. The process-count limit is NOT

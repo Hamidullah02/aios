@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -164,14 +165,29 @@ func TestBusWorker_ShellViaSandbox(t *testing.T) {
 	})
 
 	// run_shell expects argv. The command must be a real
-	// executable; on Windows the echo is a shell builtin
-	// so we route through cmd.exe.
+	// executable, and the same argv has to work on every
+	// platform: "cmd /c echo hello" is Windows-only, and on
+	// Linux the child failed with `exec: "cmd": executable file
+	// not found in $PATH`.
+	//
+	// The test binary itself is the portable executable. It is
+	// invoked with a flag that makes it exit cleanly, so the
+	// child runs a real process on every platform without
+	// depending on a shell.
+	//
+	// The argv is written as a JSON array because the plan's
+	// input format carries one string, and the path to the test
+	// binary routinely contains a space.
+	argv, err := json.Marshal(noopCommand(t))
+	if err != nil {
+		t.Fatalf("marshal argv: %v", err)
+	}
 	plan := &schemas.TaskPlan{
 		ID: "sh-1", Goal: "echo",
 		Tasks: []schemas.TaskSpec{
 			{ID: "t1", Description: "echo", Acceptance: "ok",
 				Tool:   "run_shell",
-				Inputs: []string{"command=cmd,/c,echo,hello"}},
+				Inputs: []string{"command=" + string(argv)}},
 		},
 	}
 	report, err := o.Run(context.Background(), plan, nil)
@@ -185,6 +201,28 @@ func TestBusWorker_ShellViaSandbox(t *testing.T) {
 	if !kindExists(taskRows, "tool_call") {
 		t.Errorf("expected tool_call row for t1, got: %v", kindsOf(taskRows))
 	}
+}
+
+// noopCommand returns an argv that runs successfully on every
+// platform.
+//
+// It is the test binary itself, invoked with a flag that makes
+// the Go test runner exit cleanly without running any test. That
+// gives a real executable to launch without depending on a
+// shell, and it is portable: "cmd /c echo hello" works on
+// Windows and fails on Linux with `exec: "cmd": executable file
+// not found in $PATH`.
+//
+// The result is a JSON array, because the plan's `key=value`
+// input format carries one string and the path to the test
+// binary routinely contains a space.
+func noopCommand(t *testing.T) []string {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable path: %v", err)
+	}
+	return []string{self, "-test.run=^$"}
 }
 
 // TestBusWorker_AskTool exercises the ask-user tool when

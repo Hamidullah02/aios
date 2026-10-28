@@ -195,8 +195,18 @@ func TestNamespacePolicy_Validate(t *testing.T) {
 	if err := p.Validate(); err != nil {
 		t.Fatalf("default policy is invalid: %v", err)
 	}
-	if !p.User || !p.Network || !p.Mount || !p.PID {
+	// The user, mount and pid namespaces are on: they do not
+	// conflict with anything else in the runner.
+	if !p.User || !p.Mount || !p.PID {
 		t.Fatalf("default policy = %+v", p)
+	}
+	// The network namespace is off. A child in its own network
+	// namespace cannot reach the egress proxy, which is bound to
+	// loopback in the parent's namespace, so the child's network
+	// is not governed by the allow list at all. See
+	// DefaultNamespacePolicy.
+	if p.Network {
+		t.Error("the default policy must not use the network namespace")
 	}
 	var nilPolicy *NamespacePolicy
 	if err := nilPolicy.Validate(); err != nil {
