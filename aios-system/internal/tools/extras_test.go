@@ -80,8 +80,16 @@ func TestResolvePath_AlreadyAbs_Inside(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != p {
-		t.Fatalf("got %q, want %q", got, p)
+	// The result is canonicalized, so it is compared in canonical
+	// form. On Windows the temp directory's path can carry an 8.3
+	// short name that EvalSymlinks expands, and the raw join does
+	// not.
+	want, err := canonicalPath(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
