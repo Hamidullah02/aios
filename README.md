@@ -8,21 +8,20 @@ repository root are what you want.
 
 ## Install
 
-macOS and Linux:
-
-```
-curl -fsSL https://raw.githubusercontent.com/Hamidullah02/aios/main/install.sh | sh
-```
-
 Windows (PowerShell):
 
 ```powershell
 irm https://raw.githubusercontent.com/Hamidullah02/aios/main/install.ps1 | iex
 ```
 
-The installer downloads a prebuilt binary for your machine, checks
+The installer downloads the prebuilt binary for your machine, checks
 that it runs, and puts it on your PATH. There is no Go toolchain
 needed and nothing to compile.
+
+aios ships for Windows on x64. The release pipeline builds
+`windows/amd64` and nothing else, so the installer offers only
+that: a machine on any other architecture gets a clear message
+instead of a failed download.
 
 From source instead:
 

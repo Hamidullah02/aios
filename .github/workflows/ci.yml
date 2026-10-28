@@ -26,8 +26,8 @@ permissions:
 
 jobs:
   test:
-    name: test (linux)
-    runs-on: ubuntu-latest
+    name: test (windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +50,7 @@ jobs:
 
   race:
     name: race detector
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -60,8 +60,9 @@ jobs:
           cache: true
 
       # The race detector needs cgo, so it needs a C compiler. The
-      # runner has one (gcc is preinstalled on ubuntu-latest), so
-      # unlike the release job this one runs with CGO_ENABLED=1.
+      # windows runner has one (the Visual Studio build tools are
+      # preinstalled), so unlike the release job this one runs with
+      # CGO_ENABLED=1.
       #
       # The release job cannot do this: it must produce binaries
       # that run without a C toolchain on the user's machine, which
@@ -76,19 +77,11 @@ jobs:
 
   cross-compile:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
           - goos: windows
             goarch: amd64
     steps:
@@ -111,7 +104,7 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -o /dev/null ./cmd/aios
+        run: go build -trimpath -o aios.exe ./cmd/aios
 
       - name: Vet for this target
         working-directory: aios-system

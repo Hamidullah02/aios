@@ -1,10 +1,15 @@
 # Builds the aios release binaries and attaches them to a
 # GitHub release.
 #
-# The point of this workflow is the install script. install.sh
-# and install.ps1 download a named asset from a release; this
-# workflow is what produces that asset. Without it the
-# installer has nothing to install.
+# The point of this workflow is the install script. install.ps1
+# downloads a named asset from a release; this workflow is what
+# produces that asset. Without it the installer has nothing to
+# install.
+#
+# aios ships for Windows, so this builds the one Windows asset
+# the installer asks for: windows/amd64. Building assets for
+# platforms that are not supported would mean publishing binaries
+# that are not tested and not supported.
 #
 # The binaries are built with CGO_ENABLED=0 so they run on any
 # machine of the same OS and CPU without a C toolchain. The
@@ -28,23 +33,11 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: linux
-            goarch: amd64
-            asset: aios_linux_amd64
-          - os: linux
-            goarch: arm64
-            asset: aios_linux_arm64
-          - os: darwin
-            goarch: amd64
-            asset: aios_darwin_amd64
-          - os: darwin
-            goarch: arm64
-            asset: aios_darwin_arm64
           - os: windows
             goarch: amd64
             asset: aios_windows_amd64
@@ -107,10 +100,9 @@ jobs:
           -ldflags="-s -w
           -X github.com/Hamidullah02/aios/aios-system/internal/version.Version=$TAG
           -X github.com/Hamidullah02/aios/aios-system/internal/version.Commit=$COMMIT"
-          -o aios ./cmd/aios
+          -o aios.exe ./cmd/aios
 
       - name: Check the binary reports the tag it was built from
-        if: matrix.os != 'windows'
         working-directory: aios-system
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
@@ -118,31 +110,24 @@ jobs:
         # -ldflags path builds fine and produces a binary that
         # says "dev" -- and the only way to notice is to run it.
         run: |
-          reported="$(./aios --version)"
-          echo "aios reports: $reported"
-          case "$reported" in
-            *"$TAG"*) echo "version stamp is correct" ;;
-            *) echo "ERROR: binary does not report $TAG" >&2; exit 1 ;;
-          esac
-
-      - name: Package (tar.gz)
-        if: matrix.os != 'windows'
-        working-directory: aios-system
-        run: tar -czf "${{ matrix.asset }}.tar.gz" aios
+          $reported = ./aios.exe --version
+          Write-Host "aios reports: $reported"
+          if ($reported -notlike "*$env:TAG*") {
+            Write-Error "binary does not report $env:TAG"
+            exit 1
+          }
 
       - name: Package (zip)
-        if: matrix.os == 'windows'
         working-directory: aios-system
-        run: zip "${{ matrix.asset }}.zip" aios
+        run: Compress-Archive -Path aios.exe -DestinationPath "${{ matrix.asset }}.zip"
 
       - name: Check the binary runs
-        if: matrix.os != 'windows'
         working-directory: aios-system
-        run: ./aios --help
+        run: ./aios.exe --help
 
   release:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       # The full history is needed: this job pushes the module tag,
       # and a shallow clone has no parent commits to point it at.
@@ -156,17 +141,12 @@ jobs:
           merge-multiple: true
 
       - name: Write the release notes
+        shell: pwsh
         run: |
-          cat > notes.md <<'EOF'
+          @'
           The aios CLI.
 
           ## Install
-
-          macOS / Linux:
-
-          ```
-          curl -fsSL https://raw.githubusercontent.com/Hamidullah02/aios/main/install.sh | sh
-          ```
 
           Windows (PowerShell):
 
@@ -196,23 +176,25 @@ jobs:
           ```
 
           The UI opens in your browser. Type what you want done.
-          EOF
+          '@ | Set-Content -Path notes.md -Encoding utf8
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
+        shell: pwsh
         run: |
-          # The installers go out with the release as well as living
+          # The installer goes out with the release as well as living
           # in the repository. A user who lands on the release page
           # should not have to know that the script is in the source
           # tree; the tag's own copy is the one that matches the
           # binaries in this release.
-          cp install.sh install.ps1 dist/
-          gh release create "$TAG" dist/* \
-            --title "aios $TAG" \
-            --notes-file notes.md \
-            || gh release upload "$TAG" dist/* --clobber
+          Copy-Item install.ps1 dist/
+          $assets = Get-ChildItem dist | ForEach-Object { $_.FullName }
+          gh release create $env:TAG @assets `
+            --title "aios $env:TAG" `
+            --notes-file notes.md `
+            --clobber
 
       - name: Tag the module so `go install` can find it
         env:

@@ -13,16 +13,16 @@ import (
 
 // repoRoot is the directory holding the repository's root files.
 //
-// The tests that read install.sh and install.ps1 need to find
-// them, and they live above the module directory: the git
-// repository root is the PARENT of this module.
+// The tests that read install.ps1 need to find it, and it lives
+// above the module directory: the git repository root is the
+// PARENT of this module.
 //
 // The helper used to step up exactly two levels, which landed
 // on the module root (aios-system/) and not on the repository
 // root, so the installer tests failed with "cannot find the
 // repository root" on a tree where the installers exist. The
 // walk up is bounded, and it stops at the first directory that
-// actually has install.sh in it.
+// actually has install.ps1 in it.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -36,11 +36,11 @@ func repoRoot(t *testing.T) string {
 			break
 		}
 		dir = parent
-		if _, statErr := os.Stat(filepath.Join(dir, "install.sh")); statErr == nil {
+		if _, statErr := os.Stat(filepath.Join(dir, "install.ps1")); statErr == nil {
 			return dir
 		}
 	}
-	t.Fatalf("cannot find the repository root (no install.sh above %s)", dir)
+	t.Fatalf("cannot find the repository root (no install.ps1 above %s)", dir)
 	return ""
 }
 
@@ -68,7 +68,7 @@ func TestInstallers_PointAtTheRealRepo(t *testing.T) {
 		goModule   = "github.com/Hamidullah02/aios/aios-system"
 	)
 
-	for _, name := range []string{"install.sh", "install.ps1", ".github/workflows/release.yml", "README.md"} {
+	for _, name := range []string{"install.ps1", ".github/workflows/release.yml", "README.md"} {
 		path := filepath.Join(root, filepath.FromSlash(name))
 		body, err := os.ReadFile(path)
 		if err != nil {
@@ -106,14 +106,13 @@ func TestInstallers_PointAtTheRealRepo(t *testing.T) {
 // A rename on one side and not the other produces an installer
 // that downloads a 404 for every platform, and the failure looks
 // like "the release has no build for your machine".
+//
+// aios ships for Windows, so the workflow builds one asset and
+// the installer asks for that one.
 func TestInstallers_AssetNamesMatchTheWorkflow(t *testing.T) {
 	root := repoRoot(t)
 
 	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	shell, err := os.ReadFile(filepath.Join(root, "install.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,25 +121,13 @@ func TestInstallers_AssetNamesMatchTheWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The platforms the workflow builds.
-	platforms := []string{
-		"aios_linux_amd64",
-		"aios_linux_arm64",
-		"aios_darwin_amd64",
-		"aios_darwin_arm64",
-		"aios_windows_amd64",
-	}
-	for _, asset := range platforms {
-		if !strings.Contains(string(workflow), asset) {
-			t.Errorf("the workflow does not build %q", asset)
-		}
+	// The platform the workflow builds.
+	if !strings.Contains(string(workflow), "aios_windows_amd64") {
+		t.Error("the workflow does not build \"aios_windows_amd64\"")
 	}
 
-	// The installers must derive the asset name from the same
+	// The installer must derive the asset name from the same
 	// pattern the workflow uses.
-	if !strings.Contains(string(shell), "aios_${os}_${arch}") {
-		t.Error("install.sh does not use the aios_<os>_<arch> asset pattern")
-	}
 	if !strings.Contains(string(ps), "aios_windows_$cpu") {
 		t.Error("install.ps1 does not use the aios_windows_<cpu> asset pattern")
 	}
