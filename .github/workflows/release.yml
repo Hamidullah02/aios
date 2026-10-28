@@ -138,6 +138,16 @@ jobs:
         working-directory: aios-system
         run: ./aios.exe --help
 
+      # The artifact has to be uploaded for the release job to have
+      # anything to publish. Without this step the release job
+      # downloaded an empty directory and had no assets.
+      - name: Upload the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: aios-system/${{ matrix.asset }}.zip
+          if-no-files-found: error
+
   release:
     needs: build
     runs-on: windows-latest
@@ -202,8 +212,13 @@ jobs:
           # should not have to know that the script is in the source
           # tree; the tag's own copy is the one that matches the
           # binaries in this release.
+          #
+          # The assets are already in dist/ -- download-artifact
+          # put them there. So the installer goes IN, not into a
+          # subdirectory of it.
           Copy-Item install.ps1 dist/
           $assets = Get-ChildItem dist | ForEach-Object { $_.FullName }
+          Write-Host "publishing: $($assets -join ', ')"
           gh release create $env:TAG @assets `
             --title "aios $env:TAG" `
             --notes-file notes.md `
