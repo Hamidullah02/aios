@@ -47,14 +47,19 @@ The run algorithm is:
 
 ## Platform support
 
-- Linux: the resource limits are applied through
-  `syscall.Setrlimit` via `golang.org/x/sys/unix`. The CPU,
-  memory, and process limits are honored. The runner also puts the
-  child in its own user, mount, and pid namespaces when
-  the kernel allows them. The network namespace is not used: the
-  egress proxy is bound to loopback in the parent's network
-  namespace, and a child in its own network namespace cannot reach
-  it.
+- Linux: the resource limits are applied to the **child**, with
+  `prlimit(2)`, after it has started. The parent's own limits are
+  left alone. That matters: Go starts a child with `clone(2)` and
+  `CLONE_VM`, so the child shares the parent's address space until
+  it execs, and a limit set on the parent is also a limit on the
+  parent's own Go runtime. The CPU, memory, and process limits are
+  honored. The process budget is relative to the tasks the real UID
+  already has, because the kernel compares that total against
+  `RLIMIT_NPROC`. The runner also puts the child in its own user,
+  mount, and pid namespaces when the kernel allows them. The network
+  namespace is not used: the egress proxy is bound to loopback in
+  the parent's network namespace, and a child in its own network
+  namespace cannot reach it.
 - macOS: the resource limits are applied through
   `syscall.Setrlimit` via `golang.org/x/sys/unix`. The CPU and
   memory limits are honored. The process-count limit is NOT
@@ -66,7 +71,7 @@ The run algorithm is:
   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). The wall-clock timeout
   is the other bound. The child is created suspended and resumed
   after the job assignment lands, so a grandchild cannot escape
-  the job.
+  the job. This is the supported platform.
 
 ## Process-tree containment
 

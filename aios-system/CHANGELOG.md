@@ -1,5 +1,78 @@
 # Changelog
 
+## v0.57.0 — every file tool was broken on the Windows CI runner
+
+**On Windows, the path check made the workspace and the paths inside
+it incomparable.** `ResolvePath` canonicalized the path with
+`EvalSymlinks` and left the workspace as it was. On Windows that is
+fatal, for two reasons that only appear together.
+
+The first is the 8.3 short name. `EvalSymlinks` expands
+`C:\Users\RUNNER~1\AppData` into `C:\Users\runneradmin\AppData`. The
+GitHub runner's temp directory is in the short form.
+
+The second is that `EvalSymlinks` fails on the **whole** path when
+any part of it does not exist — and the file a tool is about to
+create does not exist yet. So
+`...\RUNNER~1\AppData\Local\Temp\x\a.txt` resolved to nothing and
+kept its short name, while the workspace — which does exist — was
+expanded to the long form.
+
+The two no longer matched. The prefix check failed, and every path
+inside the workspace was reported as being outside it:
+
+```
+tools: path "a.txt" is outside workspace "C:\Users\RUNNER~1\..."
+```
+
+Every file tool was broken at once: `read`, `read_file`, `write`,
+`edit`, `multi_edit`, `apply_patch`, `notebook_edit`,
+`read_image`, and the plan writers that go through them. Forty
+tests failed for one reason.
+
+The fix resolves the **longest existing ancestor** and re-attaches
+the part that does not exist yet. The short name is expanded, and a
+symlink that points out of the workspace is still followed and still
+caught — the symlink exists, so it is on the ancestor side of the
+split. Both sides now go through one `canonicalPath` helper, so
+the workspace and the paths inside it cannot drift apart again.
+
+The regression test reproduces the short name on the local machine
+with `GetShortPathName`, so this does not need CI to catch it
+again. It fails against the old code.
+
+### The pipeline now says what is true
+
+**Windows is the target platform, and the pipeline was not.** CI ran
+on `ubuntu-latest` and the release built five binaries for five
+platforms. None of them had been run by a person.
+
+The product is a Windows tool: the installer is a PowerShell script,
+the shell helper is `run_shell`, the whole development loop happens
+on Windows. So:
+
+- CI runs on `windows-latest`. The race detector needs cgo and a C
+  compiler, and the Windows runner has one.
+- The release builds `windows/amd64` and nothing else. Publishing
+  binaries for platforms that are not supported means shipping
+  something that is neither tested nor supported.
+- `install.sh` is gone. It asked for `aios_linux_amd64` and
+  `aios_darwin_amd64` assets the release no longer builds, and the
+  README pointed at it — so the first thing a user would have done
+  would have failed.
+- The bash-isms went with the runner change: the release notes were
+  written with a heredoc, the assets were copied with `cp`, and the
+  release was created with a shell glob. All three are PowerShell
+  now.
+
+### A child that died said nothing about why
+
+A child that exited non-zero reported only `exit status 2`. A Go
+child that hits a limit exits 2 and writes the reason to stderr:
+`fatal error: runtime: cannot allocate memory`. The wait error now
+carries the child's stderr, and the message leads with its first
+non-empty line.
+
 ## v0.56.0 — the binary could not say what it was, and `go install` could not work
 
 Three things stood between this repository and a user who wanted to
