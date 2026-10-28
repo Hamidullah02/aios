@@ -211,6 +211,58 @@ $PATH`, so the test failed there and passed here. The command is
 now the test binary itself, invoked so it exits cleanly, which is
 a real executable on every platform and depends on no shell.
 
+### The runner poisoned its own parent process
+
+**Every limit the runner applied was a limit the parent could
+never take back.** The runner sets the rlimits in the *parent*,
+because Go's `exec` has no way to set one in the child and the
+child inherits the parent's. The code set both the soft and the
+hard limit:
+
+```go
+unix.Setrlimit(unix.RLIMIT_AS, &unix.Rlimit{
+    Cur: uint64(l.MemoryBytes),
+    Max: uint64(l.MemoryBytes),
+})
+```
+
+But `setrlimit(2)` says an unprivileged process may lower the
+hard limit freely and may raise it only up to the previous hard
+limit. So the parent lowered its own hard limit and could never
+lift it again -- and `restoreParentLimits`, which tried to put it
+back, failed with `EPERM` while its error was discarded with
+`_ =`.
+
+The parent kept the child's limits for the rest of its life. On
+a developer machine with one user, the damage was confined. On a
+shared-uid CI runner it was not:
+
+- `RLIMIT_NPROC` counts every process belonging to the **real
+  uid**. The runner's limit of 4 applied to the whole machine, and
+  the next `fork` failed with `EAGAIN`: `resource temporarily
+  unavailable`.
+- `RLIMIT_AS` stopped the Go runtime from allocating, and the
+  process died with `fatal error: runtime: cannot allocate
+  memory`.
+
+The runner now lowers the **soft** limit and leaves the hard limit
+where it is.
+
+The trade is deliberate, and it is the safe direction. The hard
+limit is what makes a child's bound un-liftable -- a child can
+raise its own soft limit up to the hard limit -- so a soft-only
+bound is one a deliberate child can remove. But a parent that
+cannot allocate cannot run the next tool call, cannot write the
+audit log, and cannot report the failure. A parent that stays
+usable is worth more than a bound that a determined child can
+lift.
+
+When the runner *does* have the privilege to put a hard limit
+back -- that is, when it is root -- it sets both, and the child's
+bound is one it cannot lift.
+
+The same fix is on macOS, which had the identical code.
+
 ### Also in this release
 
 - The installers now print the version of the binary they actually
