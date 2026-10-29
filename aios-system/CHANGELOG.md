@@ -65,6 +65,40 @@ on Windows. So:
   release was created with a shell glob. All three are PowerShell
   now.
 
+### The release pipeline could not publish a release
+
+**Three separate defects, each of which stopped the release on its
+own.** The release has now run end to end and published v0.57.0.
+
+**The binary was stamped with no version at all.** The build passed
+`--version` a value that was empty, so the linker was given
+`-X .../internal/version.Version=` with nothing after it. The linker
+accepts that silently, and the binary reported `aios` -- with no
+version and no commit.
+
+The cause was a bash habit in a PowerShell workflow. In bash, `$TAG`
+expands from the environment. In PowerShell, `$TAG` expands from a
+*local variable* named TAG, and the step's `env:` block sets an
+*environment* variable, which PowerShell reaches as `$env:TAG`. So
+`$TAG` was empty. The same mistake was in the module-tag step, which
+would have pushed a tag called `aios-system/` at an empty commit.
+
+The check that already existed caught the first one. It runs the
+binary and compares what it reports with the tag it was built from.
+
+**The release job had nothing to publish.** The build job built the
+zip and threw it away: there was no `upload-artifact` step, so the
+release job's `download-artifact` found an empty directory. The
+upload step is in now, and it fails the build if the zip is not
+there.
+
+**The release command used a flag that does not exist.**
+`gh release create` has no `--clobber` -- that flag belongs to
+`gh release upload`. Passing it makes gh print its usage and exit 1.
+`--verify-tag` replaces it, and it is the better guard: the tag
+already exists, because the workflow ran on it, so the release must
+be created against a tag that is really there.
+
 ### A child that died said nothing about why
 
 A child that exited non-zero reported only `exit status 2`. A Go
