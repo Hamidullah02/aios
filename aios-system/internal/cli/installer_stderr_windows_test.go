@@ -82,8 +82,10 @@ func TestInstaller_AcceptsABinaryThatWritesToStderr(t *testing.T) {
 	}
 
 	installDir := filepath.Join(workDir, "installed")
+	// -NoPathUpdate: the PATH update is a per-user registry write,
+	// and a test must not change the machine it runs on.
 	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-File", localScript,
-		"-Version", "v0.0.0-test", "-InstallDir", installDir)
+		"-Version", "v0.0.0-test", "-InstallDir", installDir, "-NoPathUpdate")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("the installer rejected a working binary that wrote to stderr: %v\n%s\n"+

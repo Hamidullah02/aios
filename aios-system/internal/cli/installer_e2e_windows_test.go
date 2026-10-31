@@ -89,8 +89,12 @@ func TestInstaller_RunsEndToEndAgainstALocalRelease(t *testing.T) {
 	}
 
 	installDir := filepath.Join(workDir, "installed")
+	// -NoPathUpdate: the PATH update is a per-user registry write,
+	// and a test must not change the machine it runs on. On the CI
+	// runner it failed outright with "the process (1168) has
+	// exited".
 	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-File", localScript,
-		"-Version", "v0.0.0-test", "-InstallDir", installDir)
+		"-Version", "v0.0.0-test", "-InstallDir", installDir, "-NoPathUpdate")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("the installer failed: %v\n%s\nThe documented install command must succeed.", err, out)

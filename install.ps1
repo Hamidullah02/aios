@@ -29,12 +29,24 @@
     lives in its aios-system/ subdirectory, so the module path
     carries both: github.com/Hamidullah02/aios/aios-system. That
     is the path `go install` needs.
+
+.PARAMETER NoPathUpdate
+    Install the binary without adding it to the user PATH.
+
+    The PATH update is a per-user registry write, and it is a
+    global side effect: it changes the environment of every
+    process the user starts afterwards, on this machine, forever.
+    That is what an installer is for, and it is why the tests
+    cannot let it happen -- a test that wrote to the real user
+    PATH would change the machine it ran on, and on a CI runner
+    it failed outright with "the process (1168) has exited".
 #>
 [CmdletBinding()]
 param(
     [string]$Version = "",
     [string]$InstallDir = "",
-    [string]$Repo = "Hamidullah02/aios"
+    [string]$Repo = "Hamidullah02/aios",
+    [switch]$NoPathUpdate
 )
 
 $ErrorActionPreference = "Stop"
@@ -178,11 +190,26 @@ $why"
     Say "  $installedVersion"
 
     # The PATH is only useful if the operator's shell will see it.
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($userPath -notlike "*$InstallDir*") {
-        [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
-        Say "NOTE: $InstallDir was added to your user PATH."
-        Say "      Open a NEW terminal for it to take effect."
+    #
+    # This is a per-user registry write: it changes the environment
+    # of every process the user starts afterwards, on this machine,
+    # for good. That is what an installer is for -- but it is a
+    # global side effect, so it can be turned off. The tests need
+    # that: a test that wrote to the real user PATH would change
+    # the machine it ran on, and on a CI runner it failed with
+    # "the process (1168) has exited".
+    if ($NoPathUpdate) {
+        Say ""
+        Say "NOTE: $InstallDir was NOT added to your PATH (-NoPathUpdate)."
+        Say "      Add it yourself if you want `aios` on your PATH:"
+        Say "      [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';$InstallDir', 'User')"
+    } else {
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if ($userPath -notlike "*$InstallDir*") {
+            [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
+            Say "NOTE: $InstallDir was added to your user PATH."
+            Say "      Open a NEW terminal for it to take effect."
+        }
     }
 
     Say ""

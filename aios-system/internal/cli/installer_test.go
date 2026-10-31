@@ -83,3 +83,38 @@ func TestInstaller_ReportsTheInstalledVersion(t *testing.T) {
 		t.Error("the installer does not report a version to the operator")
 	}
 }
+
+// TestInstaller_CanSkipThePathUpdate pins that the PATH write can be
+// turned off.
+//
+// Adding the install directory to the user PATH is a per-user
+// registry write. It is the right thing for an installer to do, and
+// it is the wrong thing for a test to do: it changes the
+// environment of every process the user starts afterwards, on that
+// machine, for good.
+//
+// The CI runner refused it outright -- the test failed with "the
+// process (1168) has exited" -- which is the registry write
+// outliving the process that made it. The switch lets the tests
+// exercise the whole install path without the one side effect that
+// must not happen in an automated run.
+func TestInstaller_CanSkipThePathUpdate(t *testing.T) {
+	root := repoRoot(t)
+	body, err := os.ReadFile(filepath.Join(root, "install.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := string(body)
+
+	if !strings.Contains(ps, "[switch]$NoPathUpdate") {
+		t.Error("the installer has no -NoPathUpdate switch; " +
+			"a test cannot run the installer without writing to the real user PATH")
+	}
+	if !strings.Contains(ps, "if ($NoPathUpdate)") {
+		t.Error("the installer ignores the -NoPathUpdate switch")
+	}
+	// The registry write must still happen when the switch is off.
+	if !strings.Contains(ps, `SetEnvironmentVariable("Path"`) {
+		t.Error("the installer no longer adds the install directory to the user PATH")
+	}
+}
