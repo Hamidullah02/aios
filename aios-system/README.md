@@ -22,11 +22,17 @@ aios ships for Windows on x64. The release pipeline builds
 that: a machine on any other architecture gets a clear message
 instead of a failed download.
 
-From source instead:
+### From the source, locally
 
+If you have this tree and a Go toolchain, you do not need the
+network or a release:
+
+```powershell
+..\install-local.ps1
 ```
-go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest
-```
+
+It builds this module, runs the test suite, checks the binary runs,
+and puts it on the PATH.
 
 ## Your model key
 
@@ -298,7 +304,7 @@ request. It has three jobs:
 | --- | --- |
 | `test` | `go vet ./...` and `go test ./...` with `CGO_ENABLED=0`, matching how the binaries are built |
 | `race` | `go test -race ./...` with `CGO_ENABLED=1` |
-| `cross-compile` | builds and vets all five release targets (linux/darwin on amd64+arm64, windows on amd64) |
+| `cross-compile` | builds and vets the one release target (windows on amd64) |
 
 The release workflow runs the same checks, including the race detector,
 before it packages a binary. It is not enough to have CI on pull requests:
@@ -306,8 +312,8 @@ a tag can be pushed without one ever being opened.
 
 ## Notes on the doc set
 
-The aios-core doc set (`docs/modules/aios-core/`) was written before several
-rounds of correction to the global PRD (`docs/global/PRD.md`). The
+The aios-core doc set (`../aios/docs/modules/aios-core/`) was written before several
+rounds of correction to the global PRD (`../aios/docs/global/PRD.md`). The
 implementation follows the global PRD where the two disagree, and the
 following substitutions apply:
 

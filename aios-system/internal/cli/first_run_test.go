@@ -91,10 +91,48 @@ func TestInstallers_PointAtTheRealRepo(t *testing.T) {
 			t.Errorf("%s: does not mention the release repo %q", name, githubRepo)
 		}
 		// The module path must appear where a `go install`
-		// happens.
-		if strings.Contains(text, "go install") && !strings.Contains(text, goModule) {
+		// COMMAND happens.
+		//
+		// The check looks for the command, not the words. The
+		// README explains that the module tag exists so that
+		// `go install` can resolve the module, and that sentence
+		// mentions `go install` without being a command -- and
+		// the release docs have to keep explaining the two-tag
+		// mechanism whether or not the README offers it as an
+		// install method.
+		//
+		// A bare "go install" with no path after it cannot be a
+		// broken command, so only a command counts.
+		if cmd, ok := goInstallCommand(text); ok && !strings.Contains(cmd, goModule) {
 			t.Errorf("%s: `go install` does not use the module path %q", name, goModule)
 		}
+	}
+}
+
+// goInstallCommand finds a `go install <path>` command in the text
+// and reports the whole command line.
+//
+// It reports false when there is no command -- a prose mention of
+// `go install` is not one.
+func goInstallCommand(text string) (string, bool) {
+	const marker = "go install "
+	for i := 0; ; {
+		at := strings.Index(text[i:], marker)
+		if at < 0 {
+			return "", false
+		}
+		start := i + at
+		rest := text[start+len(marker):]
+		// Take the rest of the line: a command ends there.
+		line := rest
+		if nl := strings.IndexAny(rest, "\r\n"); nl >= 0 {
+			line = rest[:nl]
+		}
+		// A path must follow. "go install` resolves" is prose.
+		if trimmed := strings.TrimSpace(line); trimmed != "" && !strings.HasPrefix(trimmed, "`") {
+			return strings.TrimSpace(text[start : start+len(marker)+len(trimmed)]), true
+		}
+		i = start + len(marker)
 	}
 }
 

@@ -1,5 +1,82 @@
 # Changelog
 
+## v0.59.0 — the product could be built and installed from a copy of the source
+
+**There was one install path, and it needed a GitHub release.**
+`install.ps1` downloads a prebuilt binary from a release. That is the
+right answer for a machine with no source and no Go toolchain. It is
+the wrong answer for a machine that has the source -- and a copy of
+the source is how the product actually gets used.
+
+The product code itself never needed GitHub: it shells out to the
+local `git` binary and talks to the model provider. The only piece
+that assumed a release was the installer.
+
+### `install-local.ps1`
+
+A new script at the repository root:
+
+```powershell
+.\install-local.ps1
+```
+
+It finds the Go toolchain (on the PATH, or in the usual places),
+builds the module in `aios-system/`, runs the test suite, checks the
+binary runs, and puts it on the PATH. It needs no network and no
+release.
+
+It stamps the version and the commit from the tree it built, so
+`aios --version` names the build:
+
+```
+aios dev (767f696)
+```
+
+A binary that cannot say what it is makes every bug report start
+with "which build is this?".
+
+It checks the binary the way the fixed release installer does — by
+its exit code, read through `Start-Process -Wait -PassThru`, not by
+whether it wrote to stderr. The old shape raised a terminating error
+under `$ErrorActionPreference = "Stop"` and rejected a working
+binary; that would have been the same failure in a new place.
+
+`-SkipTests` skips the suite when it has just run. `-NoPathUpdate`
+leaves the PATH alone, because the PATH update is a per-user
+registry write that changes every process the user starts afterwards,
+on that machine, for good. `-InstallDir` puts the binary elsewhere.
+
+### The README pointed at files that are not there
+
+The layout section listed `CHANGELOG.md` and `docs/global/PRD.md` at
+paths that do not exist: the change log is `aios-system/CHANGELOG.md`
+and the documents are under `aios/docs/`. It also listed
+`aios-env.ps1`, a helper that was never in the repository, and
+described a "Windows helper: sets GOROOT, GOPATH, PATH" that a
+reader would look for and not find.
+
+And it described the CI as building "all five release targets
+(linux/darwin on amd64+arm64, windows on amd64)". The pipeline has
+built one target -- windows on amd64 -- since the platform decision,
+and the table said otherwise.
+
+All of it is now true.
+
+### The tests
+
+Five, and they were confirmed to fail against a broken script before
+being kept: one runs `install-local.ps1` end to end and checks the
+binary it produced, one pins that the script needs no network, one
+pins that it judges the binary by its exit code, one pins that it
+stamps the version, and one pins the `-NoPathUpdate` switch.
+
+The check on the README's `go install` line was also sharpened. It
+used to fire on any mention of the words, which meant the README had
+to keep offering `go install` as an install method whether or not
+that was true. It now looks for an actual command, so the release
+documentation can explain the two-tag mechanism without the README
+having to recommend it.
+
 ## v0.58.0 — the documented install command did not work
 
 **The one command in the README failed for every user who ran it.**

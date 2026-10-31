@@ -8,7 +8,7 @@ repository root are what you want.
 
 ## Install
 
-Windows (PowerShell):
+Windows (PowerShell), from a release:
 
 ```powershell
 irm https://raw.githubusercontent.com/Hamidullah02/aios/main/install.ps1 | iex
@@ -23,15 +23,24 @@ aios ships for Windows on x64. The release pipeline builds
 that: a machine on any other architecture gets a clear message
 instead of a failed download.
 
-From source instead:
+### From the source, locally
 
-```
-go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest
+If you have this tree and a Go toolchain, you do not need the
+network or a release:
+
+```powershell
+.\install-local.ps1
 ```
 
-The Go module lives in the repository's `aios-system/` subdirectory,
-so its path carries both the repository name and the subdirectory.
-The release pipeline tags it accordingly -- see **Releasing** below.
+It builds the module in `aios-system/`, runs the test suite, checks
+the binary runs, and puts it on your PATH. It stamps the version
+from the tree, so `aios --version` names the commit the binary came
+from.
+
+The Go toolchain is not on the PATH on every machine, so the script
+looks in the usual places before giving up. Pass `-InstallDir` to
+put the binary somewhere else, `-SkipTests` when the suite has just
+run, and `-NoPathUpdate` to leave the PATH alone.
 
 To see which build you have:
 
@@ -248,11 +257,14 @@ guarantee, run aios itself inside a container.
 ## Layout
 
 ```
+install.ps1                  Installs a prebuilt binary from a release
+install-local.ps1            Builds from this tree and installs it
+README.md                    This file
+LICENSE                      MIT
 aios-system/
   go.mod                    Module root
-  README.md                 This file
+  README.md                 The module's own readme
   CHANGELOG.md              Change log
-  aios-env.ps1              Windows helper: sets GOROOT, GOPATH, PATH
   internal/
     core/                   aios-core module (this is Group 1 in the build plan)
       schemas/              Typed data contracts
@@ -277,15 +289,21 @@ aios-system/
     verify/                 aios-verify module (Group 2)
     watch/                  aios-watch module (Group 2)
   tests/                    Black-box tests
+aios/
+  docs/                     The PRD and the module doc set
 ```
+
+The change log is `aios-system/CHANGELOG.md`, and the product
+documents are under `aios/docs/`.
 
 ## Build environment
 
 - Go 1.23 lives at `E:\sadi\GO\go\`. **Do not install Go on C:.**
 - Module cache: `E:\sadi\GO\cache\`.
 - GOPATH: `E:\sadi\GO\home\`.
-- `aios-env.ps1` sets these in the current shell. Source it before any `go`
-  command: `powershell -ExecutionPolicy Bypass -Command "& .\aios-env.ps1; go test ./..."`.
+- `install-local.ps1` finds the toolchain on its own, so it needs
+  none of this set by hand. To run `go` directly, put
+  `E:\sadi\GO\go\bin` on `PATH`.
 - `CGO_ENABLED=0`. The audit log uses the pure-Go `modernc.org/sqlite` driver.
 - The race detector needs cgo, so it needs a C compiler. One is present:
   `C:\msys64\ucrt64\bin\gcc.exe`. To run it:
@@ -309,7 +327,7 @@ request. It has three jobs:
 | --- | --- |
 | `test` | `go vet ./...` and `go test ./...` with `CGO_ENABLED=0`, matching how the binaries are built |
 | `race` | `go test -race ./...` with `CGO_ENABLED=1` |
-| `cross-compile` | builds and vets all five release targets (linux/darwin on amd64+arm64, windows on amd64) |
+| `cross-compile` | builds and vets the one release target (windows on amd64) |
 
 The release workflow runs the same checks, including the race detector,
 before it packages a binary. It is not enough to have CI on pull requests:
@@ -324,7 +342,7 @@ git tag v0.56.0
 git push origin v0.56.0
 ```
 
-That builds all five targets, stamps the version and commit into each
+That builds the one target, stamps the version and commit into the
 binary, publishes the release assets, and then pushes a **second** tag,
 `aios-system/v0.56.0`.
 
@@ -346,8 +364,8 @@ shipping a binary that cannot say what it is.
 
 ## Notes on the doc set
 
-The aios-core doc set (`docs/modules/aios-core/`) was written before several
-rounds of correction to the global PRD (`docs/global/PRD.md`). The
+The aios-core doc set (`aios/docs/modules/aios-core/`) was written before several
+rounds of correction to the global PRD (`aios/docs/global/PRD.md`). The
 implementation follows the global PRD where the two disagree, and the
 following substitutions apply:
 
