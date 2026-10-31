@@ -21,9 +21,19 @@ var/
 # journey scripts -- so they are ignored rather than committed.
 approval-journey/
 browser-journey/
+hole-cli/
 hole-egress/
 hole-fix/
 hole-gitcommit/
 hole-memory/
 rina-journey/
 setup-journey/
+
+# Scratch probe directories.
+#
+# These hold one-off debug scripts and the transcripts they
+# produced. They were tracked by accident: 26 files of run output
+# and console transcripts, none of which the build or the tests
+# read. They are ignored so a future `git add .` does not put them
+# back.
+probe-flow/

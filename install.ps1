@@ -114,17 +114,64 @@ Build from source instead: go install github.com/Hamidullah02/aios/aios-system/c
     # --- check ----------------------------------------------------------
 
     $installed = Join-Path $InstallDir "aios.exe"
+
+    # The check is on the exit code, not on the absence of output.
+    #
+    # This used to be a try/catch around `& $installed --help`, and
+    # it failed for every user who ran the documented install
+    # command. Windows PowerShell turns a native command that writes
+    # to stderr into a terminating error under
+    # $ErrorActionPreference = "Stop" -- and it sets $LASTEXITCODE
+    # to -1, not the real exit code, so the catch block could not
+    # tell a working binary from a broken one. The installer
+    # aborted with "the installed binary did not run" while the
+    # binary was perfectly fine, so the user's first experience of
+    # the product was a failure with no cause they could act on.
+    #
+    # Start-Process reports the real exit code, so that is what the
+    # check reads. stderr is captured to a file rather than
+    # discarded: if the binary fails, the operator needs to see what
+    # it said.
+    $probeOut = Join-Path $tmp "probe.out"
+    $probeErr = Join-Path $tmp "probe.err"
     try {
-        & $installed --help | Out-Null
+        $proc = Start-Process -FilePath $installed -ArgumentList "--help" `
+            -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr `
+            -NoNewWindow -Wait -PassThru
+        $probeExit = $proc.ExitCode
     } catch {
-        Die "the installed binary did not run. Try: $installed --help"
+        $probeExit = 1
+        Set-Content -LiteralPath $probeErr -Value $_.Exception.Message
+    }
+    if ($probeExit -ne 0) {
+        $why = (Get-Content -LiteralPath $probeErr -Raw -ErrorAction SilentlyContinue)
+        if (-not $why) { $why = "(no error output)" }
+        Die "the installed binary did not run (exit code $probeExit). Try: $installed --help
+$why"
     }
 
     # Report what was actually installed. An operator who needs to
     # file a bug report needs the version of the binary they are
     # looking at, not the version they thought they were running.
-    $installedVersion = (& $installed --version 2>$null) -join ""
-    if (-not $installedVersion) { $installedVersion = "unknown" }
+    #
+    # The version is asked for separately, with the same
+    # Start-Process probe: `--version` writes to stdout, but the
+    # point is to read what the installed binary says about
+    # itself, and only its own output can answer that.
+    $verOut = Join-Path $tmp "version.out"
+    $verErr = Join-Path $tmp "version.err"
+    try {
+        $verProc = Start-Process -FilePath $installed -ArgumentList "--version" `
+            -RedirectStandardOutput $verOut -RedirectStandardError $verErr `
+            -NoNewWindow -Wait -PassThru
+        $installedVersion = (Get-Content -LiteralPath $verOut -Raw -ErrorAction SilentlyContinue)
+        if ($verProc.ExitCode -ne 0 -or -not $installedVersion) {
+            $installedVersion = "unknown"
+        }
+    } catch {
+        $installedVersion = "unknown"
+    }
+    $installedVersion = ($installedVersion -replace "\s+", " ").Trim()
 
     Say ""
     Say "aios is installed at $installed"

@@ -1,5 +1,108 @@
 # Changelog
 
+## v0.58.0 — the documented install command did not work
+
+**The one command in the README failed for every user who ran it.**
+The install command is:
+
+```powershell
+irm https://raw.githubusercontent.com/Hamidullah02/aios/main/install.ps1 | iex
+```
+
+It downloaded the binary, installed it, and then aborted:
+
+```
+aios: the installed binary did not run. Try: C:\Users\...\aios\bin\aios.exe --help
+```
+
+The binary was fine. It was the check that was wrong.
+
+### The check judged the binary by its output
+
+The installer ran `& $installed --help` inside a `try`/`catch` and
+treated anything thrown as "the binary did not run".
+
+Windows PowerShell raises a **terminating error** for a native
+command that writes to stderr when `$ErrorActionPreference` is
+`"Stop"` — and the installer sets it to `"Stop"` so that a failed
+download stops the script. `aios --help` wrote its usage to stderr,
+so the check threw on every run, and the installer called `Die`.
+
+There is a second half to it, and it is the quieter one. When
+PowerShell converts that stderr into a terminating error it also
+sets `$LASTEXITCODE` to **-1**, not the real exit code. A check that
+only looked at `$LASTEXITCODE` in the `catch` block could not tell a
+working binary from a broken one either.
+
+The check now reads the exit code from `Start-Process -Wait
+-PassThru`, which reports it truthfully — verified against a binary
+that writes to stderr and exits 0 (rejected: exit 1) and one that
+exits 3 (reported: exit 3).
+
+**This was verified against the published installer, not just
+against the fix.** The v0.57.0 `install.ps1` was fetched from
+GitHub and run against a stderr-writing binary: it failed, with exit
+1. The fixed installer accepted the same binary, with exit 0.
+
+### The help went to stderr, which made it invisible
+
+`aios --help` printed its usage to stderr. Help is requested
+output, not an error, and putting it there had two costs:
+
+- `aios --help > help.txt` wrote an **empty file**;
+- `aios --help | more` showed nothing.
+
+It now goes to stdout. `aios run --help` too — a flag that answers
+on stderr for one subcommand and stdout for another is a trap that
+depends on which word the operator typed.
+
+### `go install` gave you a binary that could not say what it was
+
+`go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest`
+is the README's second install method. It worked, and the binary it
+produced reported:
+
+```
+aios dev
+```
+
+It was not a dev build. It was a released one. The Go toolchain
+records the module version in the binary's build info, but it does
+not apply the release workflow's `-ldflags`, so the stamp was
+absent and the binary fell back to the literal `"dev"`.
+
+`--version` now reads the module version out of the build info when
+nothing was stamped. A `go install` binary reports
+`aios v0.58.0`; a plain `go build` in a working tree still reports
+`aios dev`, which is the truth about it.
+
+### The tests that would have caught this
+
+Three, and they were confirmed to fail against the published v0.57.0
+installer before being kept:
+
+- `TestInstaller_AcceptsABinaryThatWritesToStderr` — installs a
+  binary that writes to stderr and exits 0, which is the shape that
+  broke the release;
+- `TestInstaller_RunsEndToEndAgainstALocalRelease` — runs the real
+  `install.ps1` against a local stand-in for GitHub;
+- `TestInstaller_SmokeCheckReadsTheExitCode` — pins that the check
+  reads an exit code rather than trying to interpret output.
+
+The pattern-based installer tests that existed before could not have
+caught this: they read the script's text and look for the right
+words, and the script read perfectly while failing on every
+machine.
+
+### Also in this release
+
+- The 26 tracked files under `probe-flow/` are gone. They were
+  scratch debug scripts and the transcripts they produced — run
+  output, console logs, marker files — and nothing in the build or
+  the tests read them. The directory is now ignored.
+- The repository's `.gitignore` covers `hole-cli/` and `probe-flow/`
+  as well, so a future `git add .` cannot put them back.
+
 ## v0.57.0 — every file tool was broken on the Windows CI runner
 
 **On Windows, the path check made the workspace and the paths inside

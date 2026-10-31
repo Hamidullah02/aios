@@ -350,14 +350,50 @@ func TestMain_EndToEndDaemonNoOp(t *testing.T) {
 }
 
 // TestMain_EndToEndHelp exercises the --help flag.
+//
+// The help must land on stdout and nowhere else.
+//
+// It used to go to stderr, and that broke the command the README
+// tells a new user to run. Windows PowerShell turns a native
+// command that writes to stderr into a terminating error under
+// $ErrorActionPreference = "Stop", so the installer's own smoke
+// check failed and the documented install command aborted with
+// "the installed binary did not run" -- while the binary was
+// perfectly fine. It also made the help invisible to anything
+// that reads stdout: `aios --help > help.txt` wrote an empty file.
 func TestMain_EndToEndHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Main([]string{"aios", "--help"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code: %d", code)
 	}
-	if !strings.Contains(stdout.String(), "aios") && !strings.Contains(stderr.String(), "aios") {
-		t.Errorf("help should mention aios: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	if !strings.Contains(stdout.String(), "aios") {
+		t.Errorf("stdout = %q, want the help on stdout", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want the help on stdout and nothing on stderr", stderr.String())
+	}
+}
+
+// TestMain_EndToEndSubcommandHelp pins that a subcommand's help
+// also goes to stdout.
+//
+// `aios run --help` is the same request for help in a narrower
+// form, and it has the same reader: a person on a terminal, or a
+// script that redirected stdout to a file. A flag that answers on
+// stderr for one subcommand and on stdout for another is a trap
+// that depends on which word the operator typed.
+func TestMain_EndToEndSubcommandHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Main([]string{"aios", "run", "--help"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code: %d, stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Usage") {
+		t.Errorf("stdout = %q, want the subcommand usage on stdout", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want the help on stdout and nothing on stderr", stderr.String())
 	}
 }
 

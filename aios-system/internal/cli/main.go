@@ -50,7 +50,27 @@ func Main(argv []string, stdout, stderr io.Writer) int {
 	// than from the parsed args, because the search order
 	// depends on it and the parse has not happened yet.
 	loadDotEnv(configPathFromArgv(argv))
-	args, err := Parse(argv, stderr)
+	// Help goes to stdout, not stderr.
+	//
+	// Parse writes only the usage text to this writer; every
+	// parse error is returned as a value and printed by Main.
+	//
+	// It used to be stderr, and that broke the one command the
+	// README tells a new user to run. `aios --help` on a Windows
+	// console writes to stderr, and under the installer's
+	// `$ErrorActionPreference = "Stop"` any native command that
+	// writes to stderr raises a terminating error -- so the
+	// installer's own smoke check failed and the documented
+	// install command aborted with "the installed binary did not
+	// run", even though the binary was fine.
+	//
+	// It also made the help invisible to the things that read
+	// stdout: `aios --help > help.txt` wrote an empty file, and
+	// `aios --help | more` showed nothing.
+	//
+	// Help is requested output, not an error, so it belongs on
+	// stdout.
+	args, err := Parse(argv, stdout)
 	if err != nil {
 		if IsHelp(err) {
 			// Help was printed by Parse; exit clean.

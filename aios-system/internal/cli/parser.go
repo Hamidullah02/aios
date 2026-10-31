@@ -183,9 +183,18 @@ const DefaultLogPath = "./var/aios.db"
 // is how the log path ended up with two disagreeing defaults.
 const DefaultConfigPath = "./var/config.yaml"
 
-// Parse turns argv into an *Args. The function writes usage
-// and parse errors to w and returns them as errors. An
-// equivalent.
+// Parse turns argv into an *Args.
+//
+// The function writes the usage text to w when the operator asked
+// for help, and returns every parse failure as an error instead of
+// writing it. Nothing else is written to w.
+//
+// The caller decides where w points. Main points it at stdout:
+// help is requested output, not an error, and putting it on stderr
+// made it invisible to `> file` and to pipes -- and made the
+// installer's smoke check fail, because Windows PowerShell turns
+// any native command that writes to stderr into a terminating
+// error under `$ErrorActionPreference = "Stop"`.
 func Parse(argv []string, w io.Writer) (*Args, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("cli: no arguments")

@@ -1,7 +1,0 @@
-Plan:      probe-1
-Tasks:     1
-From:      0
-Started:   2026-10-26T13:19:09.9506826Z
-Finished:  2026-10-26T13:19:09.9745658Z
-Stopped:   completed
-Budget:    cost=0.0000 tool=2 model=0 net=0
