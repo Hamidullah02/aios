@@ -102,6 +102,36 @@ machine.
   the tests read them. The directory is now ignored.
 - The repository's `.gitignore` covers `hole-cli/` and `probe-flow/`
   as well, so a future `git add .` cannot put them back.
+- The installer takes `-NoPathUpdate`. Adding the install directory
+  to the user PATH is a per-user registry write — the right thing
+  for an installer to do and the wrong thing for a test to do,
+  because it changes the environment of every process the user
+  starts afterwards, on that machine, for good. On the CI runner it
+  failed outright with "the process (1168) has exited".
+- The release workflow can now run twice. `gh release create`
+  refuses a tag that already has a release, so a re-run — after the
+  tag was moved to pick up a fix — failed on a release that had
+  been published correctly. The publish step now updates the
+  existing release in place.
+
+### Verified against the published release
+
+Not against the working tree. The v0.58.0 assets were downloaded
+from GitHub and installed the way a user installs them:
+
+```
+irm https://raw.githubusercontent.com/Hamidullah02/aios/main/install.ps1 | iex
+```
+
+The install completes, the binary reports `aios v0.58.0` with its
+commit, the user PATH is updated, a new shell finds `aios`, and
+`aios web` serves the UI on loopback with the session token
+exchange working — an unauthenticated API call is refused with
+401, and the token URL trades itself for the `aios_session` cookie.
+
+`go install github.com/Hamidullah02/aios/aios-system/cmd/aios@latest`
+resolves to v0.58.0 through the module proxy and reports
+`aios v0.58.0`.
 
 ## v0.57.0 — every file tool was broken on the Windows CI runner
 
