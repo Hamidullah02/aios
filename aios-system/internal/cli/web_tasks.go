@@ -268,8 +268,8 @@ func (s *WebTaskSubmitter) execute(ctx context.Context, id string, plan *schemas
 // once the decision arrives. A denied request returns with an
 // error, and the card is left where the run puts it: failed.
 type taskApprovalHandler struct {
-	inner ApprovalHandler
-	store *webui.TaskStore
+	inner  ApprovalHandler
+	store  *webui.TaskStore
 	taskID string
 }
 
@@ -303,7 +303,7 @@ func (h *taskApprovalHandler) setBlocked(wfa *runtime.WaitingForApproval) {
 	detail := "waiting for your approval"
 	if payload, ok := approvalPayload(wfa); ok && payload.Action != "" {
 		detail = "waiting for your approval: " + payload.Action
-}
+	}
 	h.store.SetStatus(h.taskID, webui.TaskBlocked, detail)
 }
 

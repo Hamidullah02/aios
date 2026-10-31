@@ -87,6 +87,7 @@ LIMIT ?
 	defer rows.Close()
 	return scanRows(rows)
 }
+
 // Recent returns the most recent rows across ALL kinds, oldest
 // first, bounded by limit.
 //

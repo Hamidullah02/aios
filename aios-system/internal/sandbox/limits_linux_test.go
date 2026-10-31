@@ -241,5 +241,3 @@ func TestStatusBelongsToUID(t *testing.T) {
 		t.Error("the effective uid must not be counted as the real uid")
 	}
 }
-
-
