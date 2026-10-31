@@ -34,8 +34,16 @@ network or a release:
 
 It builds the module in `aios-system/`, runs the test suite, checks
 the binary runs, and puts it on your PATH. It stamps the version
-from the tree, so `aios --version` names the commit the binary came
-from.
+from the tree's own changelog, so `aios --version` names the build:
+
+```
+aios v0.59.0 (c980667)
+```
+
+The commit is only added when the tree is a checkout of this
+repository. A copy of the source somewhere else still builds, and
+still names its version -- it just cannot name a commit, because
+another repository's commits are not aios's.
 
 The Go toolchain is not on the PATH on every machine, so the script
 looks in the usual places before giving up. Pass `-InstallDir` to

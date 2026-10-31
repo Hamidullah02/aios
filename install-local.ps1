@@ -93,22 +93,81 @@ Say "using Go: $go"
 
 # --- work out the version ------------------------------------------------
 
-Push-Location $PSScriptRoot
-$commit = ""
-try {
-    $commit = (& git rev-parse --short HEAD 2>$null | Out-String).Trim()
-} catch {
-    # Not a git checkout. The build is still fine; it just cannot
-    # name a commit.
+# --- work out the version ------------------------------------------------
+
+# Two things have to be worked out: the version and the commit. Both
+# have to come from THIS project, not from whatever repository the
+# source happens to be sitting in.
+#
+# A copy of the source dropped into somebody else's git repository is
+# exactly that: their repository. `git describe` and `git rev-parse`
+# ask the repository that contains the working directory, so the
+# binary would announce itself as "aios v9.9.9 (3bef6cd)" -- naming
+# a version of aios that does not exist and a commit that has nothing
+# to do with this code. A version string that lies about what it is
+# is worse than one that says nothing, because it looks right: a bug
+# report would quote it, and the commit it named would not be found
+# in this project.
+#
+# So:
+#
+#   - The version comes from this project's own CHANGELOG. That file
+#     names the aios version the source is, and it travels with the
+#     source wherever the source goes.
+#
+#   - The commit comes from git, but only when the repository at the
+#     tree's root has this project's remote. A clone of this
+#     repository can name its commit. Somebody else's repository
+#     cannot, and its commits are not aios's.
+$modulePath = ""
+$goMod = Join-Path $moduleDir "go.mod"
+if (Test-Path $goMod) {
+    $moduleLine = (Get-Content $goMod | Where-Object { $_ -match '^module\s+' } | Select-Object -First 1)
+    if ($moduleLine) { $modulePath = ($moduleLine -replace '^module\s+', '').Trim() }
 }
-if (-not $Version) {
-    $Version = "dev"
+$isThisModule = ($modulePath -eq "github.com/Hamidullah02/aios/aios-system")
+if (-not $isThisModule) {
+    Die "the module at $moduleDir is $modulePath, not github.com/Hamidullah02/aios/aios-system
+This script builds aios. It cannot build anything else."
+}
+
+# The version: the newest version this project's CHANGELOG records.
+$changelogVersion = ""
+$changelog = Join-Path $moduleDir "CHANGELOG.md"
+if (Test-Path $changelog) {
+    $heading = (Get-Content $changelog | Where-Object { $_ -match '^##\s+(v[0-9])' } | Select-Object -First 1)
+    if ($heading) {
+        if ($heading -match '^##\s+(v[0-9][0-9A-Za-z.\-+]*)') { $changelogVersion = $Matches[1] }
+    }
+}
+
+# The commit: only from a repository that is this project.
+$commit = ""
+$tag = ""
+$remote = ""
+try {
+    Push-Location $PSScriptRoot
+    $remote = (& git remote get-url origin 2>$null | Out-String).Trim()
+    Pop-Location
+} catch { }
+$isThisRepository = ($remote -match 'hamidullah02/aios')
+if ($isThisRepository) {
     try {
+        Push-Location $PSScriptRoot
+        $commit = (& git rev-parse --short HEAD 2>$null | Out-String).Trim()
         $tag = (& git describe --tags --exact-match 2>$null | Out-String).Trim()
-        if ($tag) { $Version = $tag }
+        Pop-Location
     } catch { }
 }
-Pop-Location
+
+if (-not $Version) {
+    $Version = "dev"
+    if ($changelogVersion) { $Version = $changelogVersion }
+    elseif ($tag) { $Version = $tag }
+}
+if (-not $isThisRepository) {
+    Say "aios: this tree is not a checkout of the aios repository, so the build cannot name a commit"
+}
 
 Say "aios: building from $moduleDir (version $Version)"
 

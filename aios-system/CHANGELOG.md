@@ -29,11 +29,46 @@ It stamps the version and the commit from the tree it built, so
 `aios --version` names the build:
 
 ```
-aios dev (767f696)
+aios v0.59.0 (c980667)
 ```
 
 A binary that cannot say what it is makes every bug report start
 with "which build is this?".
+
+**The first version of that stamp was wrong, and it was caught by
+the test.** The version and the commit were read with `git describe`
+and `git rev-parse`, which ask whatever repository contains the
+working directory. A copy of the source dropped into somebody else's
+git repository is exactly that: their repository. The binary
+announced itself as
+
+```
+aios v9.9.9 (3bef6cd)
+```
+
+-- naming a version of aios that does not exist and a commit that has
+nothing to do with this code. A version string that lies about what
+it is is worse than one that says nothing, because it looks right: a
+bug report would quote it, and the commit it named would not be
+found in this project.
+
+So the two come from different places now:
+
+- The **version** comes from this project's own `CHANGELOG.md`,
+  which names the aios version the source is and travels with the
+  source wherever the source goes.
+- The **commit** comes from git, but only when the repository at the
+  tree's root has this project's remote. A clone of this repository
+  can name its commit. Somebody else's repository cannot, and its
+  commits are not aios's.
+
+The script also refuses to build a tree whose `go.mod` is not this
+module, so it cannot be pointed at something else by accident.
+
+All three cases are now pinned by a test: the aios repository itself
+(`aios v0.59.0 (c980667)`), a copy inside somebody else's tagged
+repository (`aios v0.59.0` -- their tag and commit refused), and a
+copy outside any repository (`aios v0.59.0`).
 
 It checks the binary the way the fixed release installer does — by
 its exit code, read through `Start-Process -Wait -PassThru`, not by
@@ -64,11 +99,12 @@ All of it is now true.
 
 ### The tests
 
-Five, and they were confirmed to fail against a broken script before
+Six, and they were confirmed to fail against a broken script before
 being kept: one runs `install-local.ps1` end to end and checks the
 binary it produced, one pins that the script needs no network, one
 pins that it judges the binary by its exit code, one pins that it
-stamps the version, and one pins the `-NoPathUpdate` switch.
+stamps the version, one pins the `-NoPathUpdate` switch, and one pins
+that it refuses to stamp another repository's tag and commit.
 
 The check on the README's `go install` line was also sharpened. It
 used to fire on any mention of the words, which meant the README had
