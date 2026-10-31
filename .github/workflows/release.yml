@@ -219,6 +219,7 @@ jobs:
           Copy-Item install.ps1 dist/
           $assets = Get-ChildItem dist | ForEach-Object { $_.FullName }
           Write-Host "publishing: $($assets -join ', ')"
+
           # No --clobber here. That flag belongs to `gh release
           # upload`, not to `gh release create`, and passing it makes
           # gh print its usage and exit 1 -- which is what happened.
@@ -227,10 +228,25 @@ jobs:
           # --verify-tag is the right guard: if the tag is not
           # there, the release would be created against a tag the
           # workflow made up.
-          gh release create $env:TAG @assets `
-            --title "aios $env:TAG" `
-            --notes-file notes.md `
-            --verify-tag
+          #
+          # A release for this tag may already exist -- the tag
+          # was force-moved to pick up a fix, and the workflow ran
+          # again. `gh release create` refuses that with "a release
+          # with the same tag name already exists", and the run
+          # failed on a release that was published correctly. The
+          # release is updated in place instead, which replaces the
+          # assets with the ones from this build.
+          $existing = gh release view $env:TAG 2>$null
+          if ($LASTEXITCODE -eq 0 -and $existing) {
+            Write-Host "a release for $env:TAG already exists; updating it"
+            gh release upload $env:TAG @assets --clobber
+            gh release edit $env:TAG --title "aios $env:TAG" --notes-file notes.md
+          } else {
+            gh release create $env:TAG @assets `
+              --title "aios $env:TAG" `
+              --notes-file notes.md `
+              --verify-tag
+          }
 
       - name: Tag the module so `go install` can find it
         env:
